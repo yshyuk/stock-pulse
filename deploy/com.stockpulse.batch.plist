@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for StockPulse — batch-style, run-once-per-dawn.
+
+  Install:
+    cp deploy/com.stockpulse.batch.plist ~/Library/LaunchAgents/
+    # edit the paths / secrets below to match your machine, then:
+    launchctl unload ~/Library/LaunchAgents/com.stockpulse.batch.plist 2>/dev/null
+    launchctl load   ~/Library/LaunchAgents/com.stockpulse.batch.plist
+
+  Notes:
+    - StartCalendarInterval runs it daily at the given time (06:00 here).
+    - NO KeepAlive: running once and exiting is the correct/normal behavior.
+    - EnvironmentVariables inject all secrets (never commit real values).
+    - If the Mac is asleep at the scheduled time, the run is MISSED. Schedule a wake:
+        sudo pmset repeat wakeorpoweron MTWRFSU 05:58:00
+      (see README "절전 대응"). Replace REPLACE_ME_USERNAME below with your macOS user.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stockpulse.batch</string>
+
+    <!-- java -jar <app>/stock-pulse.jar --spring.profiles.active=prod -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/java</string>
+        <string>-jar</string>
+        <string>/Users/REPLACE_ME_USERNAME/apps/stock-pulse/stock-pulse.jar</string>
+        <string>--spring.profiles.active=prod</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/REPLACE_ME_USERNAME/apps/stock-pulse</string>
+
+    <!-- Daily at 06:00. Keep in sync with STOCKPULSE_RUN_HOUR / pmset wake time. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Run once then exit: do NOT keep alive. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SPRING_PROFILES_ACTIVE</key>
+        <string>prod</string>
+        <key>DB_URL</key>
+        <string>jdbc:mysql://localhost:3306/stockpulse?serverTimezone=Asia/Seoul&amp;characterEncoding=UTF-8</string>
+        <key>DB_USERNAME</key>
+        <string>stockpulse</string>
+        <key>DB_PASSWORD</key>
+        <string>REPLACE_ME</string>
+        <key>TELEGRAM_BOT_TOKEN</key>
+        <string>REPLACE_ME</string>
+        <key>TELEGRAM_CHAT_ID</key>
+        <string>REPLACE_ME</string>
+        <key>DISCORD_WEBHOOK_URL</key>
+        <string>REPLACE_ME</string>
+        <key>STOCKPULSE_REPORT_DIR</key>
+        <string>/Users/Shared/stock-pulse/reports</string>
+        <key>STOCKPULSE_RUN_HOUR</key>
+        <string>6</string>
+        <!-- Reserved for future Claude analysis; leave empty for now. -->
+        <key>ANTHROPIC_API_KEY</key>
+        <string></string>
+    </dict>
+
+    <!-- stdout / stderr logs. Create the directory first: mkdir -p /Users/Shared/stock-pulse/logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/stock-pulse/logs/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/stock-pulse/logs/stderr.log</string>
+
+    <!-- Allow the job to run even slightly after the scheduled time if the Mac just woke. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

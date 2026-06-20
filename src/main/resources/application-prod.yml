@@ -1,0 +1,24 @@
+# ── prod profile (Mac Mini) ─────────────────────────────────────────────────
+# MySQL with all credentials injected from environment variables (set in the
+# launchd plist's EnvironmentVariables). Nothing secret is stored here.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/stockpulse?serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      # `update` keeps the schema in sync for this simple single-table app.
+      # TODO: switch to a migration tool (Flyway/Liquibase) + `validate` for stricter control.
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+    show-sql: false
+
+logging:
+  level:
+    com.stockpulse: INFO
+  file:
+    name: ${LOG_FILE:/Users/Shared/stock-pulse/logs/app.log}

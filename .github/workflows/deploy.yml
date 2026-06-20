@@ -1,0 +1,56 @@
+name: deploy
+
+# Batch-style deploy: build on the self-hosted runner (the Mac Mini) and swap the jar.
+# No daemon restart is needed — launchd starts the NEW jar at the next dawn run.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    env:
+      PLIST_NAME: com.stockpulse.batch.plist
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build (includes tests)
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean build
+
+      - name: Deploy jar to ~/apps/stock-pulse
+        run: |
+          set -euo pipefail
+          APP_DIR="$HOME/apps/stock-pulse"
+          mkdir -p "$APP_DIR"
+          # Build produces build/libs/stock-pulse.jar (fixed name via bootJar config).
+          cp build/libs/stock-pulse.jar "$APP_DIR/stock-pulse.jar"
+          echo "Deployed jar:"
+          ls -la "$APP_DIR/stock-pulse.jar"
+
+      - name: Sync launchd plist if changed
+        run: |
+          set -euo pipefail
+          DEST="$HOME/Library/LaunchAgents/$PLIST_NAME"
+          SRC="deploy/$PLIST_NAME"
+          # The installed plist holds machine-specific secrets/paths, so we DON'T blindly
+          # overwrite it. We only warn if the committed template changed, so the operator can
+          # re-apply edits intentionally. (First-time install is a manual step — see README.)
+          if [ ! -f "$DEST" ]; then
+            echo "::warning::$DEST not found. Install it once manually (see README 'launchd 설정')."
+          elif ! diff -q "$SRC" "$DEST" >/dev/null 2>&1; then
+            echo "::warning::Committed plist template differs from the installed one. Review deploy/$PLIST_NAME, re-apply machine-specific values, then: launchctl unload \"$DEST\"; launchctl load \"$DEST\""
+          else
+            echo "Installed plist matches the template."
+          fi

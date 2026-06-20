@@ -1,0 +1,29 @@
+# ── Build output ─────────────────────────────────────────────────────────────
+build/
+out/
+bin/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ── Secrets / environment ────────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# ── Generated reports (written at runtime) ───────────────────────────────────
+reports/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.DS_Store

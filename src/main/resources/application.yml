@@ -1,0 +1,36 @@
+# ── Common configuration (all profiles) ─────────────────────────────────────
+# Secrets are injected via environment variables; nothing sensitive is committed.
+# Default active profile is `local` so the app runs out of the box; launchd passes
+# `--spring.profiles.active=prod` on the Mac Mini.
+spring:
+  application:
+    name: stock-pulse
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  # Batch-style: the web server is kept minimal (reserved for a future read API) and the
+  # process exits right after the run via BatchRunner. There is no @Scheduled here —
+  # scheduling is owned by the OS (launchd).
+  main:
+    banner-mode: "off"
+
+server:
+  port: ${SERVER_PORT:8080}
+
+stockpulse:
+  # Where reports/YYYY-MM-DD.md is written. Override with STOCKPULSE_REPORT_DIR.
+  report-dir: ${STOCKPULSE_REPORT_DIR:reports}
+  # Reference value only — the real schedule lives in the launchd plist.
+  run-hour: ${STOCKPULSE_RUN_HOUR:6}
+  notification:
+    telegram:
+      bot-token: ${TELEGRAM_BOT_TOKEN:}
+      chat-id: ${TELEGRAM_CHAT_ID:}
+    discord:
+      webhook-url: ${DISCORD_WEBHOOK_URL:}
+  analysis:
+    # Reserved for a future Claude-backed analyzer; unused today.
+    anthropic-api-key: ${ANTHROPIC_API_KEY:}
+
+logging:
+  level:
+    com.stockpulse: INFO
