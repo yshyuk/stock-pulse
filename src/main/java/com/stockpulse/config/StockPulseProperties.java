@@ -5,6 +5,9 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Strongly-typed binding for the {@code stockpulse.*} configuration tree.
  *
@@ -40,6 +43,20 @@ public class StockPulseProperties {
     public static class Collector {
         @NestedConfigurationProperty
         private Dart dart = new Dart();
+        @NestedConfigurationProperty
+        private Naver naver = new Naver();
+    }
+
+    /** Naver Finance realtime price source (unofficial polling endpoint). Off by default. */
+    @Getter
+    @Setter
+    public static class Naver {
+        /** When true, NaverDataSource fetches realtime quotes for {@link #symbols}. */
+        private boolean enabled = false;
+        /** Realtime polling base URL (stock codes are appended). */
+        private String baseUrl = "https://polling.finance.naver.com/api/realtime/domestic/stock";
+        /** Stock codes to track, e.g. ["005930", "000660"]. */
+        private List<String> symbols = new ArrayList<>();
     }
 
     /** OpenDART (dart.fss.or.kr) disclosure source. Off by default. */

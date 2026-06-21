@@ -28,6 +28,11 @@ stockpulse:
       api-key: ${DART_API_KEY:}
       lookback-days: ${DART_LOOKBACK_DAYS:1}
       max-items: ${DART_MAX_ITEMS:50}
+    naver:
+      # When true (and symbols are set), NaverDataSource fetches realtime quotes.
+      enabled: ${NAVER_ENABLED:false}
+      # Comma-separated stock codes, e.g. NAVER_SYMBOLS=005930,000660
+      symbols: ${NAVER_SYMBOLS:}
   notification:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:}

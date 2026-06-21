@@ -53,6 +53,7 @@ com.stockpulse
 │   ├── CollectorService         # 등록된 DataSource 전부 취합
 │   └── source/
 │       ├── DummyDataSource      # 더미 가격 데이터 (스모크용)
+│       ├── NaverDataSource      # 옵션: 네이버 금융 실시간 시세 (enabled=true 시)
 │       └── DartDataSource       # 옵션: OpenDART 공시 실연동 (enabled=true 시)
 ├── processor
 │   ├── MetricProcessor          # 등락률·거래량 변화율 등 "객관 지표"만 (가격 항목만)
@@ -82,7 +83,7 @@ com.stockpulse
 
 | 인터페이스 | 위치 | 역할 | 현재 구현 | 확장 예정 |
 |---|---|---|---|---|
-| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Dart`(옵션) | 네이버·뉴스 |
+| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Naver`,`Dart`(옵션) | 뉴스 등 |
 | `ReportRenderer` | report | 출력 포맷 추상화 | `Markdown`,`Json` | 기타 포맷 |
 | `Notifier` | notification | 알림 채널 추상화 | `Telegram`,`Discord` | Slack 등 |
 | `ReportStore` | storage | 저장소 추상화 | `File`,`Db` | S3 등 |
@@ -119,6 +120,7 @@ java -jar build/libs/stock-pulse.jar
 | `DB_USERNAME` / `DB_PASSWORD` | DB 자격증명 | prod, **민감** |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 텔레그램 알림 | **민감**, 없으면 채널 비활성 |
 | `DISCORD_WEBHOOK_URL` | 디스코드 알림 | **민감**, 없으면 채널 비활성 |
+| `NAVER_ENABLED` / `NAVER_SYMBOLS` | 네이버 실시간 시세 on/off + 종목코드 | 기본 off, 예 `005930,000660` |
 | `DART_ENABLED` / `DART_API_KEY` | OpenDART 공시 수집 on/off + 키 | 기본 off, 키는 **민감** |
 | `DART_LOOKBACK_DAYS` / `DART_MAX_ITEMS` | 공시 조회 기간/건수 | 기본 1일 / 50건 |
 | `STOCKPULSE_REPORT_DIR` | 리포트 저장 경로 | 기본 `./reports` |
