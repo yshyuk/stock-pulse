@@ -45,6 +45,8 @@ public class StockPulseProperties {
     public static class Telegram {
         private String botToken;
         private String chatId;
+        /** Bot API base URL; overridable in tests to point at a mock server. */
+        private String apiBaseUrl = "https://api.telegram.org";
     }
 
     @Getter
