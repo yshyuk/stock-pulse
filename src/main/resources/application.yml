@@ -28,8 +28,10 @@ stockpulse:
     discord:
       webhook-url: ${DISCORD_WEBHOOK_URL:}
   analysis:
-    # Reserved for a future Claude-backed analyzer; unused today.
+    # When true, AnthropicReportAnalyzer calls the Claude API for second-stage analysis.
+    enabled: ${STOCKPULSE_ANALYSIS_ENABLED:false}
     anthropic-api-key: ${ANTHROPIC_API_KEY:}
+    model: ${STOCKPULSE_ANALYSIS_MODEL:claude-opus-4-8}
 
 logging:
   level:

@@ -55,11 +55,15 @@ public class StockPulseProperties {
         private String webhookUrl;
     }
 
-    /** Second-stage analysis settings. Unused today; reserved for a future Claude integration. */
+    /** Second-stage (Claude) analysis settings. Off by default — the NoOp analyzer runs. */
     @Getter
     @Setter
     public static class Analysis {
-        /** Anthropic API key (env-injected). Not used until an AnthropicReportAnalyzer is added. */
+        /** When true, AnthropicReportAnalyzer replaces the NoOp and calls the Claude API. */
+        private boolean enabled = false;
+        /** Anthropic API key (env-injected). Required when {@link #enabled} is true. */
         private String anthropicApiKey;
+        /** Claude model id used for the second-stage analysis. */
+        private String model = "claude-opus-4-8";
     }
 }

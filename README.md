@@ -60,7 +60,8 @@ com.stockpulse
 │   └── render/Markdown·Json     # MarkdownRenderer(기본) + JsonRenderer(ReportFormat.JSON)
 ├── analysis
 │   ├── ReportAnalyzer           # ★ 2차 분석 확장 포인트 인터페이스
-│   └── NoOpReportAnalyzer       # 기본 구현(아무것도 안 함). Claude 호출은 TODO
+│   ├── NoOpReportAnalyzer       # 기본 구현(아무것도 안 함) — 수동 워크플로
+│   └── AnthropicReportAnalyzer  # 옵션: Claude API 자동 호출 (enabled=true 시 @Primary)
 ├── notification
 │   ├── Notifier                 # ★ 채널 추상화 인터페이스 (둘 다 outbound webhook)
 │   ├── NotificationService      # enabled 채널로 팬아웃
@@ -82,7 +83,7 @@ com.stockpulse
 | `ReportRenderer` | report | 출력 포맷 추상화 | `Markdown`,`Json` | 기타 포맷 |
 | `Notifier` | notification | 알림 채널 추상화 | `Telegram`,`Discord` | Slack 등 |
 | `ReportStore` | storage | 저장소 추상화 | `File`,`Db` | S3 등 |
-| `ReportAnalyzer` | analysis | 2차 분석 확장점 | `NoOpReportAnalyzer` | Claude API 호출 |
+| `ReportAnalyzer` | analysis | 2차 분석 확장점 | `NoOp`,`Anthropic`(옵션) | 다른 LLM 등 |
 
 ## 4. 로컬 실행
 
@@ -117,7 +118,9 @@ java -jar build/libs/stock-pulse.jar
 | `DISCORD_WEBHOOK_URL` | 디스코드 알림 | **민감**, 없으면 채널 비활성 |
 | `STOCKPULSE_REPORT_DIR` | 리포트 저장 경로 | 기본 `./reports` |
 | `STOCKPULSE_RUN_HOUR` | 실행 시각 참조값 | 실제 스케줄은 launchd가 소유 |
-| `ANTHROPIC_API_KEY` | 미래 2차 분석용 | 지금은 미사용 |
+| `STOCKPULSE_ANALYSIS_ENABLED` | Claude 2차 분석 자동화 on/off | 기본 `false` |
+| `ANTHROPIC_API_KEY` | Claude API 키 | analysis 활성 시 필수, **민감** |
+| `STOCKPULSE_ANALYSIS_MODEL` | 2차 분석 모델 | 기본 `claude-opus-4-8` |
 
 모든 민감정보는 코드/yml에 하드코딩하지 않고 환경변수로만 주입합니다.
 
@@ -207,15 +210,22 @@ pmset -g sched            # 예약 확인
 
 배치형이라 **데몬 재시작이 필요 없습니다** — 다음 새벽 실행 때 새 jar가 자동으로 쓰입니다.
 
-## 9. 2차 Claude 분석 — 권장 수동 워크플로
+## 9. 2차 Claude 분석
 
+두 가지 방식이 있습니다.
+
+### (A) 수동 — 기본값(`NoOpReportAnalyzer`)
 1. 새벽 배치가 끝나면 텔레그램/디스코드로 리포트가 도착합니다(또는 `reports/YYYY-MM-DD.md` 확인).
 2. 리포트의 **종목 요약 표 + 종목별 상세**를 그대로 복사합니다.
 3. Claude에 붙여넣고, 관심 종목/전략 관점에서 해석·비교를 요청합니다.
    - 리포트 자체에는 어떤 매수/매도 신호도 없으므로, 판단은 이 단계에서 이뤄집니다.
-4. (미래 자동화) `ReportAnalyzer`에 `AnthropicReportAnalyzer`를 구현하고 `@Primary`로 등록하면
-   배치가 리포트 생성 직후 `api.anthropic.com`을 직접 호출해 2차 분석까지 자동화할 수 있습니다.
-   → `analysis/NoOpReportAnalyzer`의 TODO 참고. (Claude 모델 ID/엔드포인트는 연동 시점 최신 문서 확인.)
+
+### (B) 자동 — `AnthropicReportAnalyzer` (옵션)
+- `STOCKPULSE_ANALYSIS_ENABLED=true` + `ANTHROPIC_API_KEY` 설정 시 활성화됩니다.
+- 그러면 이 빈이 `@Primary`로 NoOp을 대체하고, 리포트 생성 직후 **공식 Anthropic Java SDK**로
+  `api.anthropic.com`을 호출(모델 `claude-opus-4-8`, adaptive thinking)해 2차 분석을 수행합니다.
+- 분석 결과는 리포트에 `## 2차 분석 (Claude)` 섹션으로 덧붙여져 파일·DB·알림에 함께 반영됩니다.
+- 호출 실패는 배치를 중단시키지 않고(보강 단계) 로깅 후 건너뜁니다. 모델은 `STOCKPULSE_ANALYSIS_MODEL`로 변경 가능.
 
 ## 10. 기술 스택
 

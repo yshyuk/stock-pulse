@@ -80,9 +80,14 @@ public class BatchPipeline {
             // 3) render report (Markdown)
             Report report = reportService.generate(metrics);
 
-            // 4) second-stage analysis seam (NoOp today; future: Claude API)
+            // 4) second-stage analysis seam (NoOp by default; Claude API when enabled).
+            //    If analysis was performed, fold its text into the report so storage and
+            //    notification carry it too.
             AnalysisResult analysis = reportAnalyzer.analyze(report);
             log.info("[pipeline] analysis performed={}", analysis.isPerformed());
+            if (analysis.isPerformed()) {
+                report = withAnalysis(report, analysis);
+            }
 
             // 5) store to all sinks (file + db)
             for (ReportStore store : reportStores) {
@@ -99,6 +104,18 @@ public class BatchPipeline {
             safeNotifyFailure(e, start);
             throw e;
         }
+    }
+
+    /** Returns a copy of the report with the second-stage analysis appended as a section. */
+    private Report withAnalysis(Report report, AnalysisResult analysis) {
+        String enriched = report.getContent()
+                + "\n\n---\n## 2차 분석 (Claude)\n\n" + analysis.getAnalysis() + "\n";
+        return Report.builder()
+                .reportDate(report.getReportDate())
+                .format(report.getFormat())
+                .content(enriched)
+                .generatedAt(report.getGeneratedAt())
+                .build();
     }
 
     private NotificationMessage successMessage(Report report, int stockCount, Instant start) {

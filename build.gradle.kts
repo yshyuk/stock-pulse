@@ -37,6 +37,10 @@ dependencies {
     // MySQL driver (runtime)
     runtimeOnly("com.mysql:mysql-connector-j")
 
+    // Anthropic Java SDK — second-stage analysis (Claude API). Active only when
+    // stockpulse.analysis.enabled=true; otherwise the NoOp analyzer is used.
+    implementation("com.anthropic:anthropic-java:2.34.0")
+
     // Local/dev convenience: in-memory DB so the pipeline can run end-to-end without MySQL.
     // (Active only under the `local` profile via application-local.yml.)
     runtimeOnly("com.h2database:h2")
