@@ -21,6 +21,13 @@ stockpulse:
   report-dir: ${STOCKPULSE_REPORT_DIR:reports}
   # Reference value only — the real schedule lives in the launchd plist.
   run-hour: ${STOCKPULSE_RUN_HOUR:6}
+  collector:
+    dart:
+      # When true (and an API key is set), DartDataSource pulls OpenDART disclosures.
+      enabled: ${DART_ENABLED:false}
+      api-key: ${DART_API_KEY:}
+      lookback-days: ${DART_LOOKBACK_DAYS:1}
+      max-items: ${DART_MAX_ITEMS:50}
   notification:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:}

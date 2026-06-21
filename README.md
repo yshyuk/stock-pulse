@@ -51,9 +51,12 @@ com.stockpulse
 ├── collector
 │   ├── DataSource               # ★ 멀티소스 추상화 인터페이스
 │   ├── CollectorService         # 등록된 DataSource 전부 취합
-│   └── source/DummyDataSource   # 더미 구현 1개 (실제 DART/네이버/뉴스는 TODO)
+│   └── source/
+│       ├── DummyDataSource      # 더미 가격 데이터 (스모크용)
+│       └── DartDataSource       # 옵션: OpenDART 공시 실연동 (enabled=true 시)
 ├── processor
-│   └── MetricProcessor          # 등락률·거래량 변화율 등 "객관 지표"만 계산 (판단 X)
+│   ├── MetricProcessor          # 등락률·거래량 변화율 등 "객관 지표"만 (가격 항목만)
+│   └── DisclosureProcessor      # 공시 항목 → Disclosure (리포트 공시 섹션)
 ├── report
 │   ├── ReportRenderer           # ★ 출력 포맷 추상화 인터페이스
 │   ├── ReportService            # 포맷별 렌더러 선택 + Report 생성
@@ -79,7 +82,7 @@ com.stockpulse
 
 | 인터페이스 | 위치 | 역할 | 현재 구현 | 확장 예정 |
 |---|---|---|---|---|
-| `DataSource` | collector | 데이터 소스 추상화 | `DummyDataSource` | DART·네이버·뉴스 |
+| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Dart`(옵션) | 네이버·뉴스 |
 | `ReportRenderer` | report | 출력 포맷 추상화 | `Markdown`,`Json` | 기타 포맷 |
 | `Notifier` | notification | 알림 채널 추상화 | `Telegram`,`Discord` | Slack 등 |
 | `ReportStore` | storage | 저장소 추상화 | `File`,`Db` | S3 등 |
@@ -116,6 +119,8 @@ java -jar build/libs/stock-pulse.jar
 | `DB_USERNAME` / `DB_PASSWORD` | DB 자격증명 | prod, **민감** |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 텔레그램 알림 | **민감**, 없으면 채널 비활성 |
 | `DISCORD_WEBHOOK_URL` | 디스코드 알림 | **민감**, 없으면 채널 비활성 |
+| `DART_ENABLED` / `DART_API_KEY` | OpenDART 공시 수집 on/off + 키 | 기본 off, 키는 **민감** |
+| `DART_LOOKBACK_DAYS` / `DART_MAX_ITEMS` | 공시 조회 기간/건수 | 기본 1일 / 50건 |
 | `STOCKPULSE_REPORT_DIR` | 리포트 저장 경로 | 기본 `./reports` |
 | `STOCKPULSE_RUN_HOUR` | 실행 시각 참조값 | 실제 스케줄은 launchd가 소유 |
 | `STOCKPULSE_ANALYSIS_ENABLED` | Claude 2차 분석 자동화 on/off | 기본 `false` |

@@ -1,5 +1,6 @@
 package com.stockpulse.report;
 
+import com.stockpulse.domain.Disclosure;
 import com.stockpulse.domain.Report;
 import com.stockpulse.domain.ReportFormat;
 import com.stockpulse.domain.ReportModel;
@@ -36,12 +37,17 @@ public class ReportService {
         log.info("[report] registered renderers: {}", renderers.keySet());
     }
 
-    /** Generate a report in the default (Markdown) format. */
+    /** Generate a Markdown report from metrics only (no disclosures). */
     public Report generate(List<StockMetric> metrics) {
-        return generate(metrics, ReportFormat.MARKDOWN);
+        return generate(metrics, List.of(), ReportFormat.MARKDOWN);
     }
 
-    public Report generate(List<StockMetric> metrics, ReportFormat format) {
+    /** Generate a Markdown report from metrics and disclosures. */
+    public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures) {
+        return generate(metrics, disclosures, ReportFormat.MARKDOWN);
+    }
+
+    public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures, ReportFormat format) {
         ReportRenderer renderer = renderers.get(format);
         if (renderer == null) {
             throw new IllegalStateException("No ReportRenderer registered for format " + format);
@@ -54,6 +60,7 @@ public class ReportService {
                 .reportDate(today)
                 .generatedAt(now)
                 .metrics(metrics)
+                .disclosures(disclosures)
                 .build();
 
         String content = renderer.render(model);

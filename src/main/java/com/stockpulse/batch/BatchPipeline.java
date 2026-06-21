@@ -4,11 +4,13 @@ import com.stockpulse.analysis.AnalysisResult;
 import com.stockpulse.analysis.ReportAnalyzer;
 import com.stockpulse.collector.CollectorService;
 import com.stockpulse.config.StockPulseProperties;
+import com.stockpulse.domain.Disclosure;
 import com.stockpulse.domain.RawData;
 import com.stockpulse.domain.Report;
 import com.stockpulse.domain.StockMetric;
 import com.stockpulse.notification.NotificationMessage;
 import com.stockpulse.notification.NotificationService;
+import com.stockpulse.processor.DisclosureProcessor;
 import com.stockpulse.processor.MetricProcessor;
 import com.stockpulse.report.ReportService;
 import com.stockpulse.storage.ReportStore;
@@ -40,6 +42,7 @@ public class BatchPipeline {
 
     private final CollectorService collectorService;
     private final MetricProcessor metricProcessor;
+    private final DisclosureProcessor disclosureProcessor;
     private final ReportService reportService;
     private final ReportAnalyzer reportAnalyzer;
     private final List<ReportStore> reportStores;
@@ -48,6 +51,7 @@ public class BatchPipeline {
 
     public BatchPipeline(CollectorService collectorService,
                          MetricProcessor metricProcessor,
+                         DisclosureProcessor disclosureProcessor,
                          ReportService reportService,
                          ReportAnalyzer reportAnalyzer,
                          List<ReportStore> reportStores,
@@ -55,6 +59,7 @@ public class BatchPipeline {
                          StockPulseProperties properties) {
         this.collectorService = collectorService;
         this.metricProcessor = metricProcessor;
+        this.disclosureProcessor = disclosureProcessor;
         this.reportService = reportService;
         this.reportAnalyzer = reportAnalyzer;
         this.reportStores = reportStores;
@@ -74,11 +79,12 @@ public class BatchPipeline {
             // 1) collect
             List<RawData> raw = collectorService.collectAll();
 
-            // 2) process (objective metrics only)
+            // 2) process (objective metrics + disclosures)
             List<StockMetric> metrics = metricProcessor.process(raw);
+            List<Disclosure> disclosures = disclosureProcessor.process(raw);
 
             // 3) render report (Markdown)
-            Report report = reportService.generate(metrics);
+            Report report = reportService.generate(metrics, disclosures);
 
             // 4) second-stage analysis seam (NoOp by default; Claude API when enabled).
             //    If analysis was performed, fold its text into the report so storage and

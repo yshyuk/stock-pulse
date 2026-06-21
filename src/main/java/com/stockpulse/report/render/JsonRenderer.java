@@ -64,6 +64,21 @@ public class JsonRenderer implements ReportRenderer {
         }
         root.put("stocks", stocks);
 
+        List<Map<String, Object>> disclosures = new ArrayList<>();
+        if (model.getDisclosures() != null) {
+            for (com.stockpulse.domain.Disclosure d : model.getDisclosures()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("corpName", d.getCorpName());
+                item.put("stockCode", d.getStockCode());
+                item.put("reportName", d.getReportName());
+                item.put("receiptNo", d.getReceiptNo());
+                item.put("receiptDate", d.getReceiptDate());
+                item.put("filer", d.getFiler());
+                disclosures.add(item);
+            }
+        }
+        root.put("disclosures", disclosures);
+
         try {
             return objectMapper.writeValueAsString(root);
         } catch (JsonProcessingException e) {

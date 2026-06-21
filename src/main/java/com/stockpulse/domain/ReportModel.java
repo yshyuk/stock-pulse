@@ -21,4 +21,7 @@ public class ReportModel {
     LocalDate reportDate;
     Instant generatedAt;
     List<StockMetric> metrics;
+
+    /** Disclosure items (e.g. from OpenDART); may be empty. */
+    List<Disclosure> disclosures;
 }

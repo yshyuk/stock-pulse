@@ -31,6 +31,33 @@ public class StockPulseProperties {
     @NestedConfigurationProperty
     private Analysis analysis = new Analysis();
 
+    @NestedConfigurationProperty
+    private Collector collector = new Collector();
+
+    /** Data-source settings. */
+    @Getter
+    @Setter
+    public static class Collector {
+        @NestedConfigurationProperty
+        private Dart dart = new Dart();
+    }
+
+    /** OpenDART (dart.fss.or.kr) disclosure source. Off by default. */
+    @Getter
+    @Setter
+    public static class Dart {
+        /** When true, DartDataSource fetches recent disclosures from OpenDART. */
+        private boolean enabled = false;
+        /** OpenDART API key (env-injected). Required when {@link #enabled} is true. */
+        private String apiKey;
+        /** OpenDART API base URL. */
+        private String baseUrl = "https://opendart.fss.or.kr/api";
+        /** How many days back to query disclosures (inclusive of today). */
+        private int lookbackDays = 1;
+        /** Max disclosures to keep. */
+        private int maxItems = 50;
+    }
+
     @Getter
     @Setter
     public static class Notification {

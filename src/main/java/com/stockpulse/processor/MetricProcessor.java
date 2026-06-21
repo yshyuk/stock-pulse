@@ -28,8 +28,12 @@ public class MetricProcessor {
         List<StockMetric> metrics = new ArrayList<>();
         for (RawData raw : rawData) {
             if (raw.getSymbol() == null) {
-                // Source-level items (e.g. news) have no per-stock metric yet.
-                // TODO: route these into a separate news/disclosure section of the report.
+                // Source-level items (e.g. news) have no per-stock metric.
+                continue;
+            }
+            if (raw.getPayload() == null || !raw.getPayload().containsKey("price")) {
+                // Non-price items (e.g. DART disclosures) are handled by DisclosureProcessor,
+                // not turned into empty price metrics.
                 continue;
             }
             try {
