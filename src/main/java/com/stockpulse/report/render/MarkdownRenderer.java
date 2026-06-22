@@ -35,11 +35,14 @@ public class MarkdownRenderer implements ReportRenderer {
         sb.append("> 본 리포트는 **객관적 지표만** 담습니다. 종목에 대한 판단/추천은 포함하지 않으며, ")
                 .append("2차 분석(Claude)에서 수행하세요.\n\n");
 
-        if (model.getMetrics().isEmpty()) {
-            sb.append("_수집된 종목 데이터가 없습니다._\n");
+        boolean hasMetrics = model.getMetrics() != null && !model.getMetrics().isEmpty();
+        boolean hasDisclosures = model.getDisclosures() != null && !model.getDisclosures().isEmpty();
+        if (!hasMetrics && !hasDisclosures) {
+            sb.append("_수집된 데이터가 없습니다._\n");
             return sb.toString();
         }
 
+        if (hasMetrics) {
         // Summary table.
         sb.append("## 종목 요약\n\n");
         sb.append("| 종목 | 코드 | 현재가 | 등락률 | 거래량 | 거래량 변화율 |\n");
@@ -67,6 +70,23 @@ public class MarkdownRenderer implements ReportRenderer {
             sb.append("| 거래량 | ").append(num(m.getVolume())).append(" |\n");
             sb.append("| 기준 거래량 | ").append(num(m.getPreviousVolume())).append(" |\n");
             sb.append("| 거래량 변화율 | ").append(pct(m.getVolumeChangeRate())).append(" |\n");
+            sb.append("\n");
+        }
+        } // end hasMetrics
+
+        // Disclosures (e.g. OpenDART) — objective listing, no judgement.
+        if (hasDisclosures) {
+            sb.append("## 공시\n\n");
+            sb.append("| 일자 | 종목 | 코드 | 보고서명 | 제출인 |\n");
+            sb.append("|------|------|------|----------|--------|\n");
+            for (com.stockpulse.domain.Disclosure d : model.getDisclosures()) {
+                sb.append("| ").append(nz(d.getReceiptDate()))
+                        .append(" | ").append(nz(d.getCorpName()))
+                        .append(" | ").append(nz(d.getStockCode()))
+                        .append(" | ").append(nz(d.getReportName()))
+                        .append(" | ").append(nz(d.getFiler()))
+                        .append(" |\n");
+            }
             sb.append("\n");
         }
 

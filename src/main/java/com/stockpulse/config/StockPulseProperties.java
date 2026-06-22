@@ -5,6 +5,9 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Strongly-typed binding for the {@code stockpulse.*} configuration tree.
  *
@@ -31,6 +34,47 @@ public class StockPulseProperties {
     @NestedConfigurationProperty
     private Analysis analysis = new Analysis();
 
+    @NestedConfigurationProperty
+    private Collector collector = new Collector();
+
+    /** Data-source settings. */
+    @Getter
+    @Setter
+    public static class Collector {
+        @NestedConfigurationProperty
+        private Dart dart = new Dart();
+        @NestedConfigurationProperty
+        private Naver naver = new Naver();
+    }
+
+    /** Naver Finance realtime price source (unofficial polling endpoint). Off by default. */
+    @Getter
+    @Setter
+    public static class Naver {
+        /** When true, NaverDataSource fetches realtime quotes for {@link #symbols}. */
+        private boolean enabled = false;
+        /** Realtime polling base URL (stock codes are appended). */
+        private String baseUrl = "https://polling.finance.naver.com/api/realtime/domestic/stock";
+        /** Stock codes to track, e.g. ["005930", "000660"]. */
+        private List<String> symbols = new ArrayList<>();
+    }
+
+    /** OpenDART (dart.fss.or.kr) disclosure source. Off by default. */
+    @Getter
+    @Setter
+    public static class Dart {
+        /** When true, DartDataSource fetches recent disclosures from OpenDART. */
+        private boolean enabled = false;
+        /** OpenDART API key (env-injected). Required when {@link #enabled} is true. */
+        private String apiKey;
+        /** OpenDART API base URL. */
+        private String baseUrl = "https://opendart.fss.or.kr/api";
+        /** How many days back to query disclosures (inclusive of today). */
+        private int lookbackDays = 1;
+        /** Max disclosures to keep. */
+        private int maxItems = 50;
+    }
+
     @Getter
     @Setter
     public static class Notification {
@@ -45,6 +89,8 @@ public class StockPulseProperties {
     public static class Telegram {
         private String botToken;
         private String chatId;
+        /** Bot API base URL; overridable in tests to point at a mock server. */
+        private String apiBaseUrl = "https://api.telegram.org";
     }
 
     @Getter
@@ -53,11 +99,15 @@ public class StockPulseProperties {
         private String webhookUrl;
     }
 
-    /** Second-stage analysis settings. Unused today; reserved for a future Claude integration. */
+    /** Second-stage (Claude) analysis settings. Off by default — the NoOp analyzer runs. */
     @Getter
     @Setter
     public static class Analysis {
-        /** Anthropic API key (env-injected). Not used until an AnthropicReportAnalyzer is added. */
+        /** When true, AnthropicReportAnalyzer replaces the NoOp and calls the Claude API. */
+        private boolean enabled = false;
+        /** Anthropic API key (env-injected). Required when {@link #enabled} is true. */
         private String anthropicApiKey;
+        /** Claude model id used for the second-stage analysis. */
+        private String model = "claude-opus-4-8";
     }
 }

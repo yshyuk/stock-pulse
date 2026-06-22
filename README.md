@@ -51,26 +51,31 @@ com.stockpulse
 ├── collector
 │   ├── DataSource               # ★ 멀티소스 추상화 인터페이스
 │   ├── CollectorService         # 등록된 DataSource 전부 취합
-│   └── source/DummyDataSource   # 더미 구현 1개 (실제 DART/네이버/뉴스는 TODO)
+│   └── source/
+│       ├── DummyDataSource      # 더미 가격 데이터 (스모크용)
+│       ├── NaverDataSource      # 옵션: 네이버 금융 실시간 시세 (enabled=true 시)
+│       └── DartDataSource       # 옵션: OpenDART 공시 실연동 (enabled=true 시)
 ├── processor
-│   └── MetricProcessor          # 등락률·거래량 변화율 등 "객관 지표"만 계산 (판단 X)
+│   ├── MetricProcessor          # 등락률·거래량 변화율 등 "객관 지표"만 (가격 항목만)
+│   └── DisclosureProcessor      # 공시 항목 → Disclosure (리포트 공시 섹션)
 ├── report
 │   ├── ReportRenderer           # ★ 출력 포맷 추상화 인터페이스
 │   ├── ReportService            # 포맷별 렌더러 선택 + Report 생성
-│   └── render/MarkdownRenderer  # 구현 1개 (JsonRenderer 자리 = ReportFormat.JSON, TODO)
+│   └── render/Markdown·Json     # MarkdownRenderer(기본) + JsonRenderer(ReportFormat.JSON)
 ├── analysis
 │   ├── ReportAnalyzer           # ★ 2차 분석 확장 포인트 인터페이스
-│   └── NoOpReportAnalyzer       # 기본 구현(아무것도 안 함). Claude 호출은 TODO
+│   ├── NoOpReportAnalyzer       # 기본 구현(아무것도 안 함) — 수동 워크플로
+│   └── AnthropicReportAnalyzer  # 옵션: Claude API 자동 호출 (enabled=true 시 @Primary)
 ├── notification
 │   ├── Notifier                 # ★ 채널 추상화 인터페이스 (둘 다 outbound webhook)
 │   ├── NotificationService      # enabled 채널로 팬아웃
-│   └── channel/Telegram·Discord # 전송 골격(분할/첨부 로직 자리) — 실제 전송은 TODO
+│   └── channel/Telegram·Discord # WebClient outbound 전송 (긴 리포트 분할/파일 첨부)
 ├── storage
 │   ├── ReportStore              # ★ 저장소 추상화 인터페이스
 │   ├── FileReportStore          # reports/YYYY-MM-DD.md
 │   └── DbReportStore            # JPA 저장
 ├── domain                       # RawData, StockMetric, ReportModel, Report(@Entity), ReportRepository, ReportFormat
-├── api/HealthController         # GET /api/health (+ 리포트 조회 엔드포인트 골격 TODO)
+├── api                          # HealthController(/api/health), ReportController(리포트 조회)
 └── config                       # WebClientConfig(WebClient·Clock), StockPulseProperties(yml 바인딩)
 ```
 
@@ -78,11 +83,11 @@ com.stockpulse
 
 | 인터페이스 | 위치 | 역할 | 현재 구현 | 확장 예정 |
 |---|---|---|---|---|
-| `DataSource` | collector | 데이터 소스 추상화 | `DummyDataSource` | DART·네이버·뉴스 |
-| `ReportRenderer` | report | 출력 포맷 추상화 | `MarkdownRenderer` | `JsonRenderer` |
+| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Naver`,`Dart`(옵션) | 뉴스 등 |
+| `ReportRenderer` | report | 출력 포맷 추상화 | `Markdown`,`Json` | 기타 포맷 |
 | `Notifier` | notification | 알림 채널 추상화 | `Telegram`,`Discord` | Slack 등 |
 | `ReportStore` | storage | 저장소 추상화 | `File`,`Db` | S3 등 |
-| `ReportAnalyzer` | analysis | 2차 분석 확장점 | `NoOpReportAnalyzer` | Claude API 호출 |
+| `ReportAnalyzer` | analysis | 2차 분석 확장점 | `NoOp`,`Anthropic`(옵션) | 다른 LLM 등 |
 
 ## 4. 로컬 실행
 
@@ -115,9 +120,14 @@ java -jar build/libs/stock-pulse.jar
 | `DB_USERNAME` / `DB_PASSWORD` | DB 자격증명 | prod, **민감** |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 텔레그램 알림 | **민감**, 없으면 채널 비활성 |
 | `DISCORD_WEBHOOK_URL` | 디스코드 알림 | **민감**, 없으면 채널 비활성 |
+| `NAVER_ENABLED` / `NAVER_SYMBOLS` | 네이버 실시간 시세 on/off + 종목코드 | 기본 off, 예 `005930,000660` |
+| `DART_ENABLED` / `DART_API_KEY` | OpenDART 공시 수집 on/off + 키 | 기본 off, 키는 **민감** |
+| `DART_LOOKBACK_DAYS` / `DART_MAX_ITEMS` | 공시 조회 기간/건수 | 기본 1일 / 50건 |
 | `STOCKPULSE_REPORT_DIR` | 리포트 저장 경로 | 기본 `./reports` |
 | `STOCKPULSE_RUN_HOUR` | 실행 시각 참조값 | 실제 스케줄은 launchd가 소유 |
-| `ANTHROPIC_API_KEY` | 미래 2차 분석용 | 지금은 미사용 |
+| `STOCKPULSE_ANALYSIS_ENABLED` | Claude 2차 분석 자동화 on/off | 기본 `false` |
+| `ANTHROPIC_API_KEY` | Claude API 키 | analysis 활성 시 필수, **민감** |
+| `STOCKPULSE_ANALYSIS_MODEL` | 2차 분석 모델 | 기본 `claude-opus-4-8` |
 
 모든 민감정보는 코드/yml에 하드코딩하지 않고 환경변수로만 주입합니다.
 
@@ -125,11 +135,27 @@ java -jar build/libs/stock-pulse.jar
 
 - **파일**: `${STOCKPULSE_REPORT_DIR}/YYYY-MM-DD.md` (기본 `./reports/`, gitignore됨)
 - **DB**: `report` 테이블 (`report_date`, `format`, `content`, `generated_at`)
-- **알림**: 텔레그램/디스코드로 본문 전송(긴 리포트는 분할/첨부 — 전송 로직은 TODO)
+- **알림**: 텔레그램/디스코드로 본문 전송(긴 리포트는 분할 또는 파일 첨부)
 
-## 7. Mac Mini 배포 절차
+## 7. 조회 API (선택)
 
-### 7.1 self-hosted runner 등록
+배치형이라 평소엔 실행 후 종료되지만, 서버를 띄워두면(`--stockpulse.batch.auto-run=false`)
+DB에 저장된 리포트를 조회할 수 있습니다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/health` | 헬스 체크 |
+| GET | `/api/reports/{date}` | 해당 날짜(YYYY-MM-DD) 리포트 |
+| GET | `/api/reports/latest` | 가장 최근 리포트 |
+
+```bash
+java -jar build/libs/stock-pulse.jar --stockpulse.batch.auto-run=false &
+curl localhost:8080/api/reports/latest
+```
+
+## 8. Mac Mini 배포 절차
+
+### 8.1 self-hosted runner 등록
 GitHub 저장소 → **Settings → Actions → Runners → New self-hosted runner** → macOS 안내대로 설치/실행.
 러너는 Mac Mini에서 상시 동작하며, `main` 푸시 시 `.github/workflows/deploy.yml`을 실행합니다.
 
@@ -140,13 +166,13 @@ cd ~/actions-runner
 ./svc.sh start
 ```
 
-### 7.2 디렉토리 준비
+### 8.2 디렉토리 준비
 ```bash
 mkdir -p ~/apps/stock-pulse
 mkdir -p /Users/Shared/stock-pulse/{reports,logs}
 ```
 
-### 7.3 launchd 설정
+### 8.3 launchd 설정
 ```bash
 # 템플릿 복사
 cp deploy/com.stockpulse.batch.plist ~/Library/LaunchAgents/
@@ -166,7 +192,7 @@ tail -f /Users/Shared/stock-pulse/logs/stdout.log
 - `StartCalendarInterval`로 매일 06:00 실행, `KeepAlive` 미사용(1회 실행 후 종료가 정상).
 - 표준출력/에러는 `/Users/Shared/stock-pulse/logs/`에 기록.
 
-### 7.4 절전(슬립) 대응 — 실행 누락 방지
+### 8.4 절전(슬립) 대응 — 실행 누락 방지
 Mac이 자고 있으면 launchd 스케줄이 **건너뛸 수 있습니다**. 두 가지 방법:
 
 **(권장) pmset로 예약 기상** — 실행 2분 전에 깨우기:
@@ -182,7 +208,7 @@ pmset -g sched            # 예약 확인
 ```
 > 권장 조합: `pmset repeat`로 정시 전에 **깨우고**, 실행은 짧으니 그대로 끝나면 다시 잠듭니다.
 
-### 7.5 배포 (자동)
+### 8.5 배포 (자동)
 `main`에 푸시하면 self-hosted runner에서:
 1. checkout
 2. `./gradlew clean build` (테스트 포함)
@@ -191,17 +217,24 @@ pmset -g sched            # 예약 확인
 
 배치형이라 **데몬 재시작이 필요 없습니다** — 다음 새벽 실행 때 새 jar가 자동으로 쓰입니다.
 
-## 8. 2차 Claude 분석 — 권장 수동 워크플로
+## 9. 2차 Claude 분석
 
+두 가지 방식이 있습니다.
+
+### (A) 수동 — 기본값(`NoOpReportAnalyzer`)
 1. 새벽 배치가 끝나면 텔레그램/디스코드로 리포트가 도착합니다(또는 `reports/YYYY-MM-DD.md` 확인).
 2. 리포트의 **종목 요약 표 + 종목별 상세**를 그대로 복사합니다.
 3. Claude에 붙여넣고, 관심 종목/전략 관점에서 해석·비교를 요청합니다.
    - 리포트 자체에는 어떤 매수/매도 신호도 없으므로, 판단은 이 단계에서 이뤄집니다.
-4. (미래 자동화) `ReportAnalyzer`에 `AnthropicReportAnalyzer`를 구현하고 `@Primary`로 등록하면
-   배치가 리포트 생성 직후 `api.anthropic.com`을 직접 호출해 2차 분석까지 자동화할 수 있습니다.
-   → `analysis/NoOpReportAnalyzer`의 TODO 참고. (Claude 모델 ID/엔드포인트는 연동 시점 최신 문서 확인.)
 
-## 9. 기술 스택
+### (B) 자동 — `AnthropicReportAnalyzer` (옵션)
+- `STOCKPULSE_ANALYSIS_ENABLED=true` + `ANTHROPIC_API_KEY` 설정 시 활성화됩니다.
+- 그러면 이 빈이 `@Primary`로 NoOp을 대체하고, 리포트 생성 직후 **공식 Anthropic Java SDK**로
+  `api.anthropic.com`을 호출(모델 `claude-opus-4-8`, adaptive thinking)해 2차 분석을 수행합니다.
+- 분석 결과는 리포트에 `## 2차 분석 (Claude)` 섹션으로 덧붙여져 파일·DB·알림에 함께 반영됩니다.
+- 호출 실패는 배치를 중단시키지 않고(보강 단계) 로깅 후 건너뜁니다. 모델은 `STOCKPULSE_ANALYSIS_MODEL`로 변경 가능.
+
+## 10. 기술 스택
 
 Java 21 · Spring Boot 3.3.x · Gradle(Kotlin DSL) · Spring Web(최소) · Spring Data JPA ·
 MySQL(prod) / H2(local) · Lombok · WebClient(외부 API).

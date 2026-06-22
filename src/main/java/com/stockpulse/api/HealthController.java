@@ -22,11 +22,5 @@ public class HealthController {
         return Map.of("status", "UP", "service", "stock-pulse");
     }
 
-    // TODO: report lookup endpoints (future read API). Skeleton only — not implemented yet.
-    //
-    // @GetMapping("/reports/{date}")
-    // public ReportResponse getReport(@PathVariable LocalDate date) { ... }
-    //
-    // @GetMapping("/reports/latest")
-    // public ReportResponse getLatestReport() { ... }
+    // Report lookup endpoints now live in ReportController (GET /api/reports/{date}, /latest).
 }

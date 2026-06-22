@@ -21,6 +21,18 @@ stockpulse:
   report-dir: ${STOCKPULSE_REPORT_DIR:reports}
   # Reference value only — the real schedule lives in the launchd plist.
   run-hour: ${STOCKPULSE_RUN_HOUR:6}
+  collector:
+    dart:
+      # When true (and an API key is set), DartDataSource pulls OpenDART disclosures.
+      enabled: ${DART_ENABLED:false}
+      api-key: ${DART_API_KEY:}
+      lookback-days: ${DART_LOOKBACK_DAYS:1}
+      max-items: ${DART_MAX_ITEMS:50}
+    naver:
+      # When true (and symbols are set), NaverDataSource fetches realtime quotes.
+      enabled: ${NAVER_ENABLED:false}
+      # Comma-separated stock codes, e.g. NAVER_SYMBOLS=005930,000660
+      symbols: ${NAVER_SYMBOLS:}
   notification:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:}
@@ -28,8 +40,10 @@ stockpulse:
     discord:
       webhook-url: ${DISCORD_WEBHOOK_URL:}
   analysis:
-    # Reserved for a future Claude-backed analyzer; unused today.
+    # When true, AnthropicReportAnalyzer calls the Claude API for second-stage analysis.
+    enabled: ${STOCKPULSE_ANALYSIS_ENABLED:false}
     anthropic-api-key: ${ANTHROPIC_API_KEY:}
+    model: ${STOCKPULSE_ANALYSIS_MODEL:claude-opus-4-8}
 
 logging:
   level:
