@@ -6,6 +6,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +28,8 @@ import java.util.List;
 @Slf4j
 @Component
 @Order(Integer.MAX_VALUE)
+// Never runs under the intraday profile — that mode is a long-running engine, not a one-shot batch.
+@Profile("!intraday")
 // On by default; tests set stockpulse.batch.auto-run=false so the context can load
 // without the runner calling System.exit and killing the test JVM.
 @ConditionalOnProperty(prefix = "stockpulse.batch", name = "auto-run", havingValue = "true", matchIfMissing = true)
