@@ -13,6 +13,9 @@ bin/
 # ── Generated reports (written at runtime) ───────────────────────────────────
 reports/
 
+# ── Generated trading plans (written at runtime) ─────────────────────────────
+plan/
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/

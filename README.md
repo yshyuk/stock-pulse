@@ -83,7 +83,7 @@ com.stockpulse
 
 | 인터페이스 | 위치 | 역할 | 현재 구현 | 확장 예정 |
 |---|---|---|---|---|
-| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Naver`,`Dart`(옵션) | 뉴스 등 |
+| `DataSource` | collector | 데이터 소스 추상화 | `Dummy`,`Naver`(가격),`Dart`(공시),`NaverIndex`(지수),`Ecos`(환율),`Krx`(수급) | 뉴스 등 |
 | `ReportRenderer` | report | 출력 포맷 추상화 | `Markdown`,`Json` | 기타 포맷 |
 | `Notifier` | notification | 알림 채널 추상화 | `Telegram`,`Discord` | Slack 등 |
 | `ReportStore` | storage | 저장소 추상화 | `File`,`Db` | S3 등 |
@@ -120,10 +120,16 @@ java -jar build/libs/stock-pulse.jar
 | `DB_USERNAME` / `DB_PASSWORD` | DB 자격증명 | prod, **민감** |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 텔레그램 알림 | **민감**, 없으면 채널 비활성 |
 | `DISCORD_WEBHOOK_URL` | 디스코드 알림 | **민감**, 없으면 채널 비활성 |
-| `NAVER_ENABLED` / `NAVER_SYMBOLS` | 네이버 실시간 시세 on/off + 종목코드 | 기본 off, 예 `005930,000660` |
+| `NAVER_ENABLED` / `NAVER_SYMBOLS` | 네이버 실시간 시세(가격) on/off + 종목코드 | 기본 off, 예 `005930,000660` |
 | `DART_ENABLED` / `DART_API_KEY` | OpenDART 공시 수집 on/off + 키 | 기본 off, 키는 **민감** |
 | `DART_LOOKBACK_DAYS` / `DART_MAX_ITEMS` | 공시 조회 기간/건수 | 기본 1일 / 50건 |
+| `NAVER_INDEX_ENABLED` / `NAVER_INDEX_CODES` | 네이버 지수(KOSPI/KOSDAQ) on/off + 코드 | 기본 off, 예 `KOSPI,KOSDAQ` |
+| `ECOS_ENABLED` / `ECOS_API_KEY` | 한국은행 ECOS 환율(USD/KRW) on/off + 키 | 기본 off, 키는 **민감** |
+| `KRX_ENABLED` | KRX 수급(외국인/기관 순매수) on/off | 기본 off, 실험적(응답 구조 확인 필요) |
+| `STOCKPULSE_PLAN_ENABLED` | 트레이딩 플랜 생성 on/off | 기본 on |
+| `STOCKPULSE_HEARTBEAT_URL` | 성공 시 ping할 외부 heartbeat URL | 미설정 시 비활성 |
 | `STOCKPULSE_REPORT_DIR` | 리포트 저장 경로 | 기본 `./reports` |
+| `STOCKPULSE_PLAN_DIR` | 플랜 JSON 저장 경로 | 기본 `./plan` |
 | `STOCKPULSE_RUN_HOUR` | 실행 시각 참조값 | 실제 스케줄은 launchd가 소유 |
 | `STOCKPULSE_ANALYSIS_ENABLED` | Claude 2차 분석 자동화 on/off | 기본 `false` |
 | `ANTHROPIC_API_KEY` | Claude API 키 | analysis 활성 시 필수, **민감** |

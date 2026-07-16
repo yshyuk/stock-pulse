@@ -24,8 +24,9 @@ public class CollectorService {
         this.dataSources = dataSources;
     }
 
-    public List<RawData> collectAll() {
+    public CollectionResult collectAll() {
         List<RawData> aggregated = new ArrayList<>();
+        List<String> failedRequired = new ArrayList<>();
         for (DataSource source : dataSources) {
             if (!source.isEnabled()) {
                 log.info("[collector] source '{}' disabled, skipping", source.sourceName());
@@ -36,11 +37,18 @@ public class CollectorService {
                 log.info("[collector] source '{}' returned {} item(s)", source.sourceName(), items.size());
                 aggregated.addAll(items);
             } catch (Exception e) {
-                // Partial failure: keep going so other sources still contribute.
-                log.error("[collector] source '{}' failed: {}", source.sourceName(), e.getMessage(), e);
+                // Partial failure: keep going so other sources still contribute. A required
+                // source failing marks the whole run degraded (plan is skipped downstream).
+                log.error("[collector] source '{}' failed{}: {}",
+                        source.sourceName(), source.isRequired() ? " (REQUIRED)" : "", e.getMessage(), e);
+                if (source.isRequired()) {
+                    failedRequired.add(source.sourceName());
+                }
             }
         }
-        log.info("[collector] aggregated {} raw item(s) from {} source(s)", aggregated.size(), dataSources.size());
-        return aggregated;
+        log.info("[collector] aggregated {} raw item(s) from {} source(s){}",
+                aggregated.size(), dataSources.size(),
+                failedRequired.isEmpty() ? "" : " — DEGRADED, failed required: " + failedRequired);
+        return new CollectionResult(aggregated, failedRequired);
     }
 }

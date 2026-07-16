@@ -19,8 +19,20 @@ server:
 stockpulse:
   # Where reports/YYYY-MM-DD.md is written. Override with STOCKPULSE_REPORT_DIR.
   report-dir: ${STOCKPULSE_REPORT_DIR:reports}
+  # Where plan/YYYY-MM-DD.json is written. Override with STOCKPULSE_PLAN_DIR.
+  plan-dir: ${STOCKPULSE_PLAN_DIR:plan}
   # Reference value only — the real schedule lives in the launchd plist.
   run-hour: ${STOCKPULSE_RUN_HOUR:6}
+  # Trading-plan generation (rule-based, plan-only). Rules are empty by default; define them
+  # per environment (see application-local.yml for an example). No rules = no candidates.
+  plan:
+    enabled: ${STOCKPULSE_PLAN_ENABLED:true}
+    max-budget-per-symbol-krw: ${STOCKPULSE_PLAN_MAX_PER_SYMBOL:500000}
+    max-total-budget-krw: ${STOCKPULSE_PLAN_MAX_TOTAL:2000000}
+    max-data-gap-days: ${STOCKPULSE_PLAN_MAX_GAP_DAYS:4}
+  # External dead-man's-switch heartbeat (e.g. healthchecks.io). Empty disables it.
+  heartbeat:
+    url: ${STOCKPULSE_HEARTBEAT_URL:}
   collector:
     dart:
       # When true (and an API key is set), DartDataSource pulls OpenDART disclosures.
@@ -33,6 +45,17 @@ stockpulse:
       enabled: ${NAVER_ENABLED:false}
       # Comma-separated stock codes, e.g. NAVER_SYMBOLS=005930,000660
       symbols: ${NAVER_SYMBOLS:}
+    # Market indices (KOSPI/KOSDAQ) via Naver's unofficial index polling. Off by default.
+    naver-index:
+      enabled: ${NAVER_INDEX_ENABLED:false}
+      codes: ${NAVER_INDEX_CODES:KOSPI,KOSDAQ}
+    # USD/KRW exchange rate via Bank of Korea ECOS (official; needs a free key). Off by default.
+    ecos:
+      enabled: ${ECOS_ENABLED:false}
+      api-key: ${ECOS_API_KEY:}
+    # Investor supply/demand (foreign/institution net buy) via KRX. Off by default; experimental.
+    krx:
+      enabled: ${KRX_ENABLED:false}
   notification:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:}
