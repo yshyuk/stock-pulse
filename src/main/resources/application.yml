@@ -33,6 +33,17 @@ stockpulse:
   # External dead-man's-switch heartbeat (e.g. healthchecks.io). Empty disables it.
   heartbeat:
     url: ${STOCKPULSE_HEARTBEAT_URL:}
+  # ── Part 2: intraday execution engine (active under the `intraday` profile) ──────────────
+  # Broker selection + execution mode. Default is the safest: fake broker, dry-run (never sends).
+  broker:
+    impl: ${STOCKPULSE_BROKER_IMPL:fake}          # fake | kis
+    mode: ${STOCKPULSE_BROKER_MODE:dry-run}       # dry-run | paper | live
+    live-confirmed: ${STOCKPULSE_BROKER_LIVE_CONFIRMED:false}  # must be true for mode=live to boot
+  intraday:
+    poll-interval-ms: ${STOCKPULSE_INTRADAY_POLL_MS:90000}
+    max-positions: ${STOCKPULSE_INTRADAY_MAX_POSITIONS:5}
+    daily-loss-limit-krw: ${STOCKPULSE_INTRADAY_DAILY_LOSS:100000}
+    kill-switch-file: ${STOCKPULSE_INTRADAY_KILL_FILE:}
   collector:
     dart:
       # When true (and an API key is set), DartDataSource pulls OpenDART disclosures.
