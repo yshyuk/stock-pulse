@@ -9,6 +9,7 @@ import com.stockpulse.intraday.domain.PositionRecordRepository;
 import com.stockpulse.intraday.domain.PositionStatus;
 import com.stockpulse.intraday.order.OrderService;
 import com.stockpulse.intraday.position.PositionManager;
+import com.stockpulse.intraday.recon.ReconciliationService;
 import com.stockpulse.intraday.risk.RiskGuard;
 import com.stockpulse.intraday.signal.ExitEvaluator;
 import com.stockpulse.intraday.signal.SignalEvaluator;
@@ -75,11 +76,13 @@ class IntradayEngineIntegrationTest {
                 riskGuard, signalEvaluator, brokerProps, notifier, clock);
         PositionManager positionManager = new PositionManager(broker, positionRepository,
                 new ExitEvaluator(), orderService);
+        ReconciliationService reconciliation = new ReconciliationService(broker, positionRepository,
+                brokerProps, notifier, clock);
         com.stockpulse.intraday.PlanLoader planLoader =
                 new com.stockpulse.intraday.PlanLoader(planRepository, new PlanJsonSerializer());
         MarketClock marketClock = new MarketClock(intradayProps, clock);
 
-        engine = new IntradayEngine(planLoader, orderService, positionManager, broker,
+        engine = new IntradayEngine(planLoader, orderService, positionManager, reconciliation, broker,
                 signalEvaluator, marketClock, killSwitch, brokerProps, notifier);
 
         persistPlan();

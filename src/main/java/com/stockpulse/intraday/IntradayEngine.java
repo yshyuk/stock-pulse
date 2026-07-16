@@ -5,6 +5,7 @@ import com.stockpulse.broker.Quote;
 import com.stockpulse.config.BrokerProperties;
 import com.stockpulse.intraday.order.OrderService;
 import com.stockpulse.intraday.position.PositionManager;
+import com.stockpulse.intraday.recon.ReconciliationService;
 import com.stockpulse.intraday.signal.SignalEvaluator;
 import com.stockpulse.notification.NotificationMessage;
 import com.stockpulse.notification.NotificationService;
@@ -29,6 +30,7 @@ public class IntradayEngine {
     private final PlanLoader planLoader;
     private final OrderService orderService;
     private final PositionManager positionManager;
+    private final ReconciliationService reconciliationService;
     private final BrokerClient broker;
     private final SignalEvaluator signalEvaluator;
     private final MarketClock marketClock;
@@ -43,6 +45,7 @@ public class IntradayEngine {
     public IntradayEngine(PlanLoader planLoader,
                           OrderService orderService,
                           PositionManager positionManager,
+                          ReconciliationService reconciliationService,
                           BrokerClient broker,
                           SignalEvaluator signalEvaluator,
                           MarketClock marketClock,
@@ -52,6 +55,7 @@ public class IntradayEngine {
         this.planLoader = planLoader;
         this.orderService = orderService;
         this.positionManager = positionManager;
+        this.reconciliationService = reconciliationService;
         this.broker = broker;
         this.signalEvaluator = signalEvaluator;
         this.marketClock = marketClock;
@@ -68,7 +72,22 @@ public class IntradayEngine {
             log.info("[engine] {} is not a trading day — engine idle", activeDate);
             return;
         }
-        activePlan = planLoader.load(activeDate).orElse(null);
+
+        // Reconcile local vs broker state BEFORE trading, so exit monitoring starts from truth.
+        // A boot failure here (e.g. broker unreachable) must NOT be silent: alert and stay idle
+        // rather than trading blind or dying with only a stack trace.
+        try {
+            reconciliationService.reconcile();
+            activePlan = planLoader.load(activeDate).orElse(null);
+        } catch (Exception e) {
+            active = false;
+            log.error("[engine] boot failed during reconciliation/plan load — engine idle: {}",
+                    e.getMessage(), e);
+            notify(NotificationMessage.Severity.FAILURE, "❌ 장중 엔진 부팅 실패",
+                    "리컨실/플랜 로드 중 오류로 엔진이 거래를 시작하지 않습니다: "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage());
+            return;
+        }
         active = true;
 
         String mode = brokerProperties.getMode().name();
