@@ -2,24 +2,34 @@ package com.stockpulse.batch;
 
 import com.stockpulse.analysis.AnalysisResult;
 import com.stockpulse.analysis.ReportAnalyzer;
+import com.stockpulse.collector.CollectionResult;
 import com.stockpulse.collector.CollectorService;
 import com.stockpulse.config.StockPulseProperties;
 import com.stockpulse.domain.Disclosure;
 import com.stockpulse.domain.RawData;
 import com.stockpulse.domain.Report;
 import com.stockpulse.domain.StockMetric;
+import com.stockpulse.market.DailyMarketSnapshot;
+import com.stockpulse.market.MarketStage;
 import com.stockpulse.notification.NotificationMessage;
 import com.stockpulse.notification.NotificationService;
 import com.stockpulse.processor.DisclosureProcessor;
 import com.stockpulse.processor.MetricProcessor;
+import com.stockpulse.plan.MarketContext;
+import com.stockpulse.plan.PlanStage;
+import com.stockpulse.plan.TradingPlan;
 import com.stockpulse.report.ReportService;
 import com.stockpulse.storage.ReportStore;
+import com.stockpulse.timeseries.DailyStockSnapshot;
+import com.stockpulse.timeseries.SnapshotService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -43,28 +53,40 @@ public class BatchPipeline {
     private final CollectorService collectorService;
     private final MetricProcessor metricProcessor;
     private final DisclosureProcessor disclosureProcessor;
+    private final SnapshotService snapshotService;
+    private final MarketStage marketStage;
+    private final PlanStage planStage;
     private final ReportService reportService;
     private final ReportAnalyzer reportAnalyzer;
     private final List<ReportStore> reportStores;
     private final NotificationService notificationService;
     private final StockPulseProperties properties;
+    private final Clock clock;
 
     public BatchPipeline(CollectorService collectorService,
                          MetricProcessor metricProcessor,
                          DisclosureProcessor disclosureProcessor,
+                         SnapshotService snapshotService,
+                         MarketStage marketStage,
+                         PlanStage planStage,
                          ReportService reportService,
                          ReportAnalyzer reportAnalyzer,
                          List<ReportStore> reportStores,
                          NotificationService notificationService,
-                         StockPulseProperties properties) {
+                         StockPulseProperties properties,
+                         Clock clock) {
         this.collectorService = collectorService;
         this.metricProcessor = metricProcessor;
         this.disclosureProcessor = disclosureProcessor;
+        this.snapshotService = snapshotService;
+        this.marketStage = marketStage;
+        this.planStage = planStage;
         this.reportService = reportService;
         this.reportAnalyzer = reportAnalyzer;
         this.reportStores = reportStores;
         this.notificationService = notificationService;
         this.properties = properties;
+        this.clock = clock;
     }
 
     /**
@@ -73,18 +95,54 @@ public class BatchPipeline {
      * @throws Exception if any stage fails (after a FAILURE notification has been sent)
      */
     public void run() throws Exception {
+        run(LocalDate.now(clock));
+    }
+
+    /**
+     * Runs the whole pipeline once for an explicit run date. A re-run for a past date
+     * (via {@code --stockpulse.run-date}) re-computes and upserts that day's snapshots
+     * and report idempotently.
+     *
+     * @throws Exception if any stage fails (after a FAILURE notification has been sent)
+     */
+    public void run(LocalDate runDate) throws Exception {
         Instant start = Instant.now();
-        log.info("==== StockPulse batch pipeline START ====");
+        log.info("==== StockPulse batch pipeline START (runDate={}) ====", runDate);
         try {
             // 1) collect
-            List<RawData> raw = collectorService.collectAll();
+            CollectionResult collected = collectorService.collectAll();
+            List<RawData> raw = collected.items();
+            boolean degraded = collected.hasRequiredFailure();
 
             // 2) process (objective metrics + disclosures)
             List<StockMetric> metrics = metricProcessor.process(raw);
             List<Disclosure> disclosures = disclosureProcessor.process(raw);
 
-            // 3) render report (Markdown)
-            Report report = reportService.generate(metrics, disclosures);
+            // 2b) time-series: upsert daily snapshots + derived metrics (idempotent on runDate)
+            List<DailyStockSnapshot> snapshots = snapshotService.record(runDate, metrics);
+
+            // 2b') market indicators: upsert index/FX/supply-demand snapshots + build plan context
+            List<DailyMarketSnapshot> marketSnapshots = marketStage.recordFrom(runDate, raw);
+            MarketContext marketContext = MarketContext.from(marketSnapshots);
+
+            // 2c) plan: deterministic rule-based signal candidates (plan-only, no orders).
+            //     Skipped when a required source failed (F-13) — no plan on untrustworthy data.
+            //     Other plan failures are non-fatal (enrichment): the batch still succeeds.
+            TradingPlan plan = degraded ? null : planStage.generateAndStore(runDate, snapshots, marketContext);
+            if (degraded) {
+                log.warn("[pipeline] degraded run (failed required sources: {}) — plan skipped",
+                        collected.failedRequiredSources());
+            }
+
+            // 3) render report (Markdown), then append market context / plan summary sections
+            Report report = reportService.generate(metrics, disclosures, runDate);
+            report = appendSection(report, marketStage.summaryMarkdown(marketSnapshots));
+            if (degraded) {
+                report = withDegradedWarning(report, collected.failedRequiredSources());
+            }
+            if (plan != null) {
+                report = withPlanSummary(report, planStage.summaryMarkdown(plan));
+            }
 
             // 4) second-stage analysis seam (NoOp by default; Claude API when enabled).
             //    If analysis was performed, fold its text into the report so storage and
@@ -93,6 +151,11 @@ public class BatchPipeline {
             log.info("[pipeline] analysis performed={}", analysis.isPerformed());
             if (analysis.isPerformed()) {
                 report = withAnalysis(report, analysis);
+                // Attach the same analysis to the plan as an advisory (reference only; the
+                // deterministic execution fields stay untouched). Enrichment — never fatal.
+                if (plan != null) {
+                    plan = planStage.attachAdvisory(plan, "claude", analysis.getAnalysis(), Instant.now(clock));
+                }
             }
 
             // 5) store to all sinks (file + db)
@@ -110,6 +173,44 @@ public class BatchPipeline {
             safeNotifyFailure(e, start);
             throw e;
         }
+    }
+
+    /** Returns a copy of the report with an extra section appended (no-op for blank text). */
+    private Report appendSection(Report report, String section) {
+        if (section == null || section.isBlank()) {
+            return report;
+        }
+        return Report.builder()
+                .reportDate(report.getReportDate())
+                .format(report.getFormat())
+                .content(report.getContent() + section)
+                .generatedAt(report.getGeneratedAt())
+                .build();
+    }
+
+    /** Returns a copy of the report with a degraded-run warning section appended. */
+    private Report withDegradedWarning(Report report, List<String> failedSources) {
+        String warning = "\n\n---\n## ⚠️ 데이터 경고 (일부 소스 실패)\n\n"
+                + "필수 데이터 소스가 실패해 이번 실행은 **degraded** 상태입니다. "
+                + "신뢰할 수 없는 데이터로 플랜을 만들지 않도록 **오늘의 플랜은 생성되지 않았습니다**.\n\n"
+                + "- 실패한 필수 소스: " + String.join(", ", failedSources) + "\n";
+        return Report.builder()
+                .reportDate(report.getReportDate())
+                .format(report.getFormat())
+                .content(report.getContent() + warning)
+                .generatedAt(report.getGeneratedAt())
+                .build();
+    }
+
+    /** Returns a copy of the report with the plan summary section appended. */
+    private Report withPlanSummary(Report report, String summaryMarkdown) {
+        String enriched = report.getContent() + summaryMarkdown;
+        return Report.builder()
+                .reportDate(report.getReportDate())
+                .format(report.getFormat())
+                .content(enriched)
+                .generatedAt(report.getGeneratedAt())
+                .build();
     }
 
     /** Returns a copy of the report with the second-stage analysis appended as a section. */

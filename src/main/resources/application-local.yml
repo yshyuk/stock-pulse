@@ -14,6 +14,31 @@ spring:
         format_sql: true
     show-sql: false
 
+# Example plan rules (local demo). Conditions within a rule are ANDed; a stock is a candidate
+# if it matches at least one rule. Metrics on null (insufficient history) never match — so a
+# cold first run yields no candidates until enough days have accumulated.
+stockpulse:
+  plan:
+    entry:
+      type: limit
+      offset-pct: 0.0        # entry at current price
+    exit:
+      target-pct: 5.0        # take-profit +5%
+      stop-loss-pct: -3.0    # stop-loss -3%
+    rules:
+      - id: volume-surge-3x
+        description: "거래량이 20일 평균의 3배 이상"
+        conditions:
+          - metric: volumeMa20Ratio
+            op: GTE
+            value: 3.0
+      - id: momentum-up-5pct
+        description: "전일 대비 5% 이상 상승"
+        conditions:
+          - metric: changeRate1d
+            op: GTE
+            value: 5.0
+
 logging:
   level:
     com.stockpulse: DEBUG

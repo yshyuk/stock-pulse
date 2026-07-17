@@ -57,6 +57,12 @@ public class NaverDataSource implements DataSource {
         return !properties.getCollector().getNaver().getSymbols().isEmpty();
     }
 
+    /** Naver is the real price feed — if it fails, the run is degraded and no plan is emitted. */
+    @Override
+    public boolean isRequired() {
+        return true;
+    }
+
     @Override
     public List<RawData> collect() {
         StockPulseProperties.Naver cfg = properties.getCollector().getNaver();

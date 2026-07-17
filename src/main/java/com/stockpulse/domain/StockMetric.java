@@ -21,6 +21,9 @@ public class StockMetric {
     String symbol;
     String name;
 
+    /** Originating DataSource name (e.g. naver, dummy), for time-series provenance. */
+    String source;
+
     /** Latest close/price. */
     BigDecimal price;
 

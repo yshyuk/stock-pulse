@@ -39,35 +39,40 @@ public class ReportService {
 
     /** Generate a Markdown report from metrics only (no disclosures). */
     public Report generate(List<StockMetric> metrics) {
-        return generate(metrics, List.of(), ReportFormat.MARKDOWN);
+        return generate(metrics, List.of(), LocalDate.now(clock), ReportFormat.MARKDOWN);
     }
 
-    /** Generate a Markdown report from metrics and disclosures. */
+    /** Generate a Markdown report from metrics and disclosures for the clock's current date. */
     public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures) {
-        return generate(metrics, disclosures, ReportFormat.MARKDOWN);
+        return generate(metrics, disclosures, LocalDate.now(clock), ReportFormat.MARKDOWN);
     }
 
-    public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures, ReportFormat format) {
+    /** Generate a Markdown report for an explicit run date (supports re-runs, F-03). */
+    public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures, LocalDate runDate) {
+        return generate(metrics, disclosures, runDate, ReportFormat.MARKDOWN);
+    }
+
+    public Report generate(List<StockMetric> metrics, List<Disclosure> disclosures,
+                           LocalDate runDate, ReportFormat format) {
         ReportRenderer renderer = renderers.get(format);
         if (renderer == null) {
             throw new IllegalStateException("No ReportRenderer registered for format " + format);
         }
 
         Instant now = Instant.now(clock);
-        LocalDate today = LocalDate.now(clock);
 
         ReportModel model = ReportModel.builder()
-                .reportDate(today)
+                .reportDate(runDate)
                 .generatedAt(now)
                 .metrics(metrics)
                 .disclosures(disclosures)
                 .build();
 
         String content = renderer.render(model);
-        log.info("[report] rendered {} report ({} chars) for {}", format, content.length(), today);
+        log.info("[report] rendered {} report ({} chars) for {}", format, content.length(), runDate);
 
         return Report.builder()
-                .reportDate(today)
+                .reportDate(runDate)
                 .format(format)
                 .content(content)
                 .generatedAt(now)

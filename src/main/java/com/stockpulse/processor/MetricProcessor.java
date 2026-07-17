@@ -55,6 +55,7 @@ public class MetricProcessor {
         return StockMetric.builder()
                 .symbol(raw.getSymbol())
                 .name(raw.getName())
+                .source(raw.getSourceName())
                 .price(price)
                 .previousPrice(previousPrice)
                 .changeRate(percentChange(previousPrice, price))

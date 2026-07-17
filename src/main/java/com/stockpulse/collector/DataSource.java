@@ -20,6 +20,15 @@ public interface DataSource {
     boolean isEnabled();
 
     /**
+     * Whether this source is REQUIRED for a trustworthy run. If a required source fails, the
+     * run is treated as degraded and plan generation is skipped (F-13). Defaults to false so
+     * optional/enrichment sources never block the plan.
+     */
+    default boolean isRequired() {
+        return false;
+    }
+
+    /**
      * Fetch the raw items this source provides for the current run.
      *
      * <p>Implementations should be self-contained (own error handling for partial failures)
