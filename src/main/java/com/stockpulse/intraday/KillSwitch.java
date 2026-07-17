@@ -4,8 +4,11 @@ import com.stockpulse.config.IntradayProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -21,10 +24,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class KillSwitch {
 
     private final IntradayProperties properties;
+    private final Clock clock;
     private final AtomicBoolean tripped = new AtomicBoolean(false);
 
-    public KillSwitch(IntradayProperties properties) {
+    public KillSwitch(IntradayProperties properties, Clock clock) {
         this.properties = properties;
+        this.clock = clock;
     }
 
     /** True if new orders must be blocked (in-memory trip OR kill file present). */
@@ -40,10 +45,37 @@ public class KillSwitch {
         return false;
     }
 
-    /** Trip the switch in-memory (idempotent). New orders are blocked until process restart. */
+    /**
+     * Trip the switch (idempotent). Persists to the kill file when configured so the trip
+     * SURVIVES a crash/restart — an in-memory-only trip would silently reset when launchd
+     * restarts the engine, resuming trading after a breached loss limit.
+     */
     public void engage(String reason) {
-        if (tripped.compareAndSet(false, true)) {
-            log.error("[killswitch] ENGAGED: {} — no further new orders this session", reason);
+        if (!tripped.compareAndSet(false, true)) {
+            return; // already engaged
+        }
+        log.error("[killswitch] ENGAGED: {} — no further new orders", reason);
+        persist(reason);
+    }
+
+    /** Writes the kill file so the trip outlives this process. */
+    private void persist(String reason) {
+        String file = properties.getKillSwitchFile();
+        if (file == null || file.isBlank()) {
+            log.error("[killswitch] no kill-switch file configured — the trip will NOT survive a "
+                    + "restart. Set stockpulse.intraday.kill-switch-file for durable protection.");
+            return;
+        }
+        Path path = Path.of(file);
+        try {
+            if (path.getParent() != null) {
+                Files.createDirectories(path.getParent());
+            }
+            Files.writeString(path, Instant.now(clock) + " " + reason + System.lineSeparator());
+            log.error("[killswitch] persisted to {} — remove this file to re-enable trading", path);
+        } catch (IOException e) {
+            log.error("[killswitch] FAILED to persist kill file {} — trip is memory-only: {}",
+                    path, e.getMessage(), e);
         }
     }
 }

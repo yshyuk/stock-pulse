@@ -53,7 +53,7 @@ class OrderServiceTest {
         broker = new FakeBrokerClient(clock);
         brokerProps = new BrokerProperties();
         IntradayProperties intradayProps = new IntradayProperties();
-        RiskGuard riskGuard = new RiskGuard(intradayProps, new KillSwitch(intradayProps));
+        RiskGuard riskGuard = new RiskGuard(intradayProps, new KillSwitch(intradayProps, clock));
         service = new OrderService(broker, orderRepository, positionRepository, riskGuard,
                 new SignalEvaluator(), brokerProps, new NotificationService(List.of()), clock);
     }

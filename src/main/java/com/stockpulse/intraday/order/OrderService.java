@@ -144,6 +144,13 @@ public class OrderService {
         }
 
         int qty = position.getQuantity();
+        // Exits deliberately bypass the RiskGuard (closing risk must never be blocked, even under
+        // the kill switch), so this is the sell path's only sanity check: never send a nonsensical
+        // quantity from a corrupted position record.
+        if (qty <= 0) {
+            log.error("[order] refusing SELL {} — invalid position quantity {}", symbol, qty);
+            return SubmitOutcome.NO_QUANTITY;
+        }
         BigDecimal price = quote.price();
         OrderRequest request = new OrderRequest(
                 clientOrderId, symbol, OrderSide.SELL, OrderType.LIMIT, qty, price);
