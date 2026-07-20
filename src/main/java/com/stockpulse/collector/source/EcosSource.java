@@ -67,8 +67,17 @@ public class EcosSource implements DataSource {
         String uri = String.join("/", cfg.getBaseUrl(), "StatisticSearch", cfg.getApiKey(),
                 "json", "kr", "1", "100", cfg.getStatCode(), cfg.getCycle(), from, to, cfg.getItemCode());
 
-        JsonNode body = webClient.get().uri(uri)
-                .retrieve().bodyToMono(JsonNode.class).block();
+        JsonNode body;
+        try {
+            body = webClient.get().uri(uri)
+                    .retrieve().bodyToMono(JsonNode.class).block();
+        } catch (Exception e) {
+            // The API key is in the URL path — never let a raw exception (whose message echoes the
+            // URI) reach the logs. Optional source: degrade to empty rather than failing the run.
+            log.error("[collector:ecos] request failed: {}",
+                    SecretMasker.mask(e.getMessage(), cfg.getApiKey()));
+            return List.of();
+        }
 
         if (body == null) {
             log.warn("[collector:ecos] empty response");

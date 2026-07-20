@@ -73,11 +73,20 @@ public class DartDataSource implements DataSource {
                 .build()
                 .toUriString();
 
-        JsonNode body = webClient.get()
-                .uri(uri)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        JsonNode body;
+        try {
+            body = webClient.get()
+                    .uri(uri)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+        } catch (Exception e) {
+            // crtfc_key rides in the query string — never let a raw exception (whose message echoes
+            // the URI) reach the logs. Optional source: degrade to empty rather than failing the run.
+            log.error("[collector:dart] request failed: {}",
+                    SecretMasker.mask(e.getMessage(), cfg.getApiKey()));
+            return List.of();
+        }
 
         if (body == null) {
             log.warn("[collector:dart] empty response");

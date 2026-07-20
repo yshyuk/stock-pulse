@@ -67,7 +67,7 @@ class IntradayEngineIntegrationTest {
         BrokerProperties brokerProps = new BrokerProperties();
         brokerProps.setMode(BrokerMode.PAPER);
         IntradayProperties intradayProps = new IntradayProperties();
-        KillSwitch killSwitch = new KillSwitch(intradayProps);
+        KillSwitch killSwitch = new KillSwitch(intradayProps, clock);
         RiskGuard riskGuard = new RiskGuard(intradayProps, killSwitch);
         SignalEvaluator signalEvaluator = new SignalEvaluator();
         NotificationService notifier = new NotificationService(List.of());

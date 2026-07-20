@@ -15,6 +15,10 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Bind to loopback only. The report/plan API is UNAUTHENTICATED and exposes the day's trading
+  # plan and positions; on 0.0.0.0 anyone on the LAN could read it. Override deliberately (and
+  # add auth first) if remote access is ever needed.
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 stockpulse:
   # Where reports/YYYY-MM-DD.md is written. Override with STOCKPULSE_REPORT_DIR.
