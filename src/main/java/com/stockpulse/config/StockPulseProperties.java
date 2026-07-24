@@ -51,6 +51,38 @@ public class StockPulseProperties {
     @NestedConfigurationProperty
     private Heartbeat heartbeat = new Heartbeat();
 
+    @NestedConfigurationProperty
+    private Dispatch dispatch = new Dispatch();
+
+    /**
+     * Outbound delivery of the day's plan to an external execution system (stock-api
+     * SignalIngest). Off by default: without this the plan stays a local artifact.
+     *
+     * <p>See stock-api ADR-002 — this process never places an order itself; it hands the plan
+     * to a consumer that applies its own guardrails and deterministic execution.
+     */
+    @Getter
+    @Setter
+    public static class Dispatch {
+        /** When true (and a URL is set), the batch pushes the finished plan downstream. */
+        private boolean enabled = false;
+
+        /** Full ingest endpoint, e.g. {@code http://127.0.0.1:8081/v1/signals/plans}. */
+        private String url;
+
+        /** Shared secret sent as the ingest API-key header. Env-injected. */
+        private String apiKey;
+
+        /** Total attempts including the first (3 = initial + 2 retries). */
+        private int maxAttempts = 3;
+
+        /** Fixed delay between attempts. */
+        private long retryDelayMs = 2000;
+
+        /** Per-attempt request timeout. */
+        private int timeoutSeconds = 10;
+    }
+
     /**
      * External dead-man's-switch heartbeat (e.g. healthchecks.io). When {@link #url} is set,
      * the batch pings it on success so a MISSED run (launchd skipped, machine asleep) is
@@ -80,6 +112,15 @@ public class StockPulseProperties {
     public static class Plan {
         /** When true, the pipeline generates and stores a daily plan. */
         private boolean enabled = true;
+
+        /**
+         * What the generated plan is FOR: {@code plan-only} (local reference) or {@code signal}
+         * (intended for an external execution consumer). Deliberately explicit rather than
+         * inferred from {@link Dispatch#isEnabled()} — marking a plan as executable is a
+         * decision worth writing down, and {@code PlanDispatcher} refuses to send anything that
+         * is not marked {@code signal}.
+         */
+        private String mode = "plan-only";
 
         /** Max budget per single symbol (KRW). */
         private BigDecimal maxBudgetPerSymbolKrw = new BigDecimal("500000");
