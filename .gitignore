@@ -11,10 +11,12 @@ bin/
 !.env.example
 
 # ── Generated reports (written at runtime) ───────────────────────────────────
-reports/
+# Leading slash anchors these to the repo root: unanchored, `plan/` also matched the
+# src/main/java/com/stockpulse/plan source package and kept it out of version control.
+/reports/
 
 # ── Generated trading plans (written at runtime) ─────────────────────────────
-plan/
+/plan/
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
