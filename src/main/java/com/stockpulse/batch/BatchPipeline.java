@@ -15,9 +15,12 @@ import com.stockpulse.notification.NotificationMessage;
 import com.stockpulse.notification.NotificationService;
 import com.stockpulse.processor.DisclosureProcessor;
 import com.stockpulse.processor.MetricProcessor;
+import com.stockpulse.intraday.review.IntradayReviewReporter;
 import com.stockpulse.plan.MarketContext;
 import com.stockpulse.plan.PlanStage;
 import com.stockpulse.plan.TradingPlan;
+import com.stockpulse.plan.dispatch.DispatchResult;
+import com.stockpulse.plan.dispatch.PlanDispatcher;
 import com.stockpulse.report.ReportService;
 import com.stockpulse.storage.ReportStore;
 import com.stockpulse.timeseries.DailyStockSnapshot;
@@ -56,6 +59,8 @@ public class BatchPipeline {
     private final SnapshotService snapshotService;
     private final MarketStage marketStage;
     private final PlanStage planStage;
+    private final PlanDispatcher planDispatcher;
+    private final IntradayReviewReporter intradayReviewReporter;
     private final ReportService reportService;
     private final ReportAnalyzer reportAnalyzer;
     private final List<ReportStore> reportStores;
@@ -69,6 +74,8 @@ public class BatchPipeline {
                          SnapshotService snapshotService,
                          MarketStage marketStage,
                          PlanStage planStage,
+                         PlanDispatcher planDispatcher,
+                         IntradayReviewReporter intradayReviewReporter,
                          ReportService reportService,
                          ReportAnalyzer reportAnalyzer,
                          List<ReportStore> reportStores,
@@ -81,6 +88,8 @@ public class BatchPipeline {
         this.snapshotService = snapshotService;
         this.marketStage = marketStage;
         this.planStage = planStage;
+        this.planDispatcher = planDispatcher;
+        this.intradayReviewReporter = intradayReviewReporter;
         this.reportService = reportService;
         this.reportAnalyzer = reportAnalyzer;
         this.reportStores = reportStores;
@@ -134,9 +143,11 @@ public class BatchPipeline {
                         collected.failedRequiredSources());
             }
 
-            // 3) render report (Markdown), then append market context / plan summary sections
+            // 3) render report (Markdown), then append market context / plan / intraday-review sections
             Report report = reportService.generate(metrics, disclosures, runDate);
             report = appendSection(report, marketStage.summaryMarkdown(marketSnapshots));
+            // M4 feedback loop: yesterday's intraday execution results in this morning's report.
+            report = appendSection(report, intradayReviewReporter.morningSection(runDate));
             if (degraded) {
                 report = withDegradedWarning(report, collected.failedRequiredSources());
             }
@@ -163,8 +174,13 @@ public class BatchPipeline {
                 store.save(report);
             }
 
-            // 6) notify success
-            notificationService.broadcast(successMessage(report, metrics.size(), start));
+            // 5b) hand the finished plan (advisory included, for audit) to the external execution
+            //     consumer. Best-effort by design: a delivery failure means "no agent signals
+            //     downstream today", never a failed batch and never a forced order.
+            DispatchResult dispatch = planDispatcher.dispatch(plan);
+
+            // 6) notify success — surfacing a failed hand-off, which is otherwise invisible
+            notificationService.broadcast(successMessage(report, metrics.size(), start, dispatch));
 
             log.info("==== StockPulse batch pipeline SUCCESS in {} ====", elapsed(start));
         } catch (Exception e) {
@@ -225,17 +241,31 @@ public class BatchPipeline {
                 .build();
     }
 
-    private NotificationMessage successMessage(Report report, int stockCount, Instant start) {
+    private NotificationMessage successMessage(Report report, int stockCount, Instant start,
+                                               DispatchResult dispatch) {
         Path reportFile = Path.of(properties.getReportDir())
                 .resolve(report.getReportDate().format(DATE) + report.getFormat().fileExtension());
         String title = "✅ StockPulse 리포트 생성 완료 (" + report.getReportDate().format(DATE) + ")";
-        String body = "종목 " + stockCount + "건, 소요 " + elapsed(start) + "\n\n" + report.getContent();
+        String body = "종목 " + stockCount + "건, 소요 " + elapsed(start)
+                + dispatchNotice(dispatch) + "\n\n" + report.getContent();
         return NotificationMessage.builder()
                 .severity(NotificationMessage.Severity.SUCCESS)
                 .title(title)
                 .body(body)
                 .attachmentPath(reportFile.toAbsolutePath().toString())
                 .build();
+    }
+
+    /**
+     * One line about the plan hand-off, but only when it FAILED. A successful or skipped
+     * dispatch is the expected state and does not need to compete for attention in the report.
+     */
+    private String dispatchNotice(DispatchResult dispatch) {
+        if (dispatch == null || !dispatch.isFailed()) {
+            return "";
+        }
+        return "\n\n⚠️ 플랜 전송 실패 (" + dispatch.attempts() + "회 시도) — 오늘 실행 시스템에 "
+                + "agent 신호가 전달되지 않았습니다. 원인: " + dispatch.reason();
     }
 
     private void safeNotifyFailure(Exception e, Instant start) {

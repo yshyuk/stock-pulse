@@ -31,9 +31,21 @@ stockpulse:
   # per environment (see application-local.yml for an example). No rules = no candidates.
   plan:
     enabled: ${STOCKPULSE_PLAN_ENABLED:true}
+    # plan-only = 로컬 참고용 / signal = 외부 실행 시스템(stock-api)이 소비할 신호.
+    # signal 로 바꾸는 것은 "이 플랜이 실제 조건을 만들어도 된다"는 명시적 선언이다.
+    mode: ${STOCKPULSE_PLAN_MODE:plan-only}
     max-budget-per-symbol-krw: ${STOCKPULSE_PLAN_MAX_PER_SYMBOL:500000}
     max-total-budget-krw: ${STOCKPULSE_PLAN_MAX_TOTAL:2000000}
     max-data-gap-days: ${STOCKPULSE_PLAN_MAX_GAP_DAYS:4}
+  # 완성된 플랜을 stock-api SignalIngest 로 전송 (stock-api ADR-002).
+  # 기본 off. 전송 실패는 배치 실패가 아니며 "오늘 agent 신호 없음"으로 fail-safe 처리된다.
+  dispatch:
+    enabled: ${STOCKPULSE_DISPATCH_ENABLED:false}
+    url: ${STOCKPULSE_DISPATCH_URL:}
+    api-key: ${STOCKPULSE_DISPATCH_API_KEY:}
+    max-attempts: ${STOCKPULSE_DISPATCH_MAX_ATTEMPTS:3}
+    retry-delay-ms: ${STOCKPULSE_DISPATCH_RETRY_DELAY_MS:2000}
+    timeout-seconds: ${STOCKPULSE_DISPATCH_TIMEOUT_SEC:10}
   # External dead-man's-switch heartbeat (e.g. healthchecks.io). Empty disables it.
   heartbeat:
     url: ${STOCKPULSE_HEARTBEAT_URL:}

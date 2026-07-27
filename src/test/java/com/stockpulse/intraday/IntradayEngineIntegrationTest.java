@@ -92,6 +92,7 @@ class IntradayEngineIntegrationTest {
     private void persistPlan() {
         PlanCandidate candidate = PlanCandidate.builder()
                 .symbol("005930").name("삼성전자").matchedRules(List.of("momentum"))
+                .priority(1)
                 .entry(Entry.builder().type("limit").priceKrw(new BigDecimal("61000")).build())
                 .exit(Exit.builder().targetPriceKrw(new BigDecimal("64000"))
                         .stopLossPriceKrw(new BigDecimal("59000")).build())
