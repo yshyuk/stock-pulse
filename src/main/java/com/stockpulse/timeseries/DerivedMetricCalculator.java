@@ -22,12 +22,18 @@ public class DerivedMetricCalculator {
     private static final int VOL_WINDOW = 20;   // trading days for volume MA and volatility
 
     /**
-     * @param price   today's price (must be non-null)
+     * @param price          today's price (must be non-null)
+     * @param previousPrice  the previous close as reported BY THE SOURCE (nullable). Preferred
+     *                       over our own history for the 1-day change: it is always the real
+     *                       prior session, whereas {@code priors.get(0)} is only the previous
+     *                       session if no run was ever missed. It also lets the 1-day rules work
+     *                       on a cold start, before any history exists.
      * @param volume  today's volume (nullable)
      * @param priors  prior snapshots for the same symbol, strictly before today,
      *                ordered most-recent-first (index 0 = previous trading day)
      */
-    public DerivedMetrics compute(BigDecimal price, Long volume, List<DailyStockSnapshot> priors) {
+    public DerivedMetrics compute(BigDecimal price, BigDecimal previousPrice, Long volume,
+                                  List<DailyStockSnapshot> priors) {
         if (price == null) {
             return DerivedMetrics.empty();
         }
@@ -36,7 +42,7 @@ public class DerivedMetricCalculator {
             priorPrices.add(s.getPrice());
         }
         return DerivedMetrics.builder()
-                .changeRate1d(changeOver(price, priorPrices, 1))
+                .changeRate1d(changeRate1d(price, previousPrice, priorPrices))
                 .changeRate5d(changeOver(price, priorPrices, 5))
                 .changeRate20d(changeOver(price, priorPrices, 20))
                 .volumeMa20Ratio(volumeMaRatio(volume, priors))
@@ -46,12 +52,29 @@ public class DerivedMetricCalculator {
                 .build();
     }
 
+    /**
+     * Day-over-day change, from the source's own previous close when it gave one, otherwise from
+     * the most recent prior snapshot. Only the 1-day metric gets this treatment — the 5/20-day
+     * ones have no source-reported equivalent.
+     */
+    private BigDecimal changeRate1d(BigDecimal price, BigDecimal previousPrice,
+                                    List<BigDecimal> priorPrices) {
+        if (previousPrice != null && previousPrice.signum() != 0) {
+            return percent(price, previousPrice);
+        }
+        return changeOver(price, priorPrices, 1);
+    }
+
     /** (price - price N trading days ago) / that price * 100. Null when history < N. */
     private BigDecimal changeOver(BigDecimal price, List<BigDecimal> priorPrices, int daysBack) {
         if (priorPrices.size() < daysBack) {
             return null;
         }
-        BigDecimal base = priorPrices.get(daysBack - 1);
+        return percent(price, priorPrices.get(daysBack - 1));
+    }
+
+    /** (price - base) / base * 100, or null when base is missing or zero. */
+    private BigDecimal percent(BigDecimal price, BigDecimal base) {
         if (base == null || base.signum() == 0) {
             return null;
         }

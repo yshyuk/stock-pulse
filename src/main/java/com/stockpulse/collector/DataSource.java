@@ -2,6 +2,7 @@ package com.stockpulse.collector;
 
 import com.stockpulse.domain.RawData;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -29,10 +30,14 @@ public interface DataSource {
     }
 
     /**
-     * Fetch the raw items this source provides for the current run.
+     * Fetch the raw items this source provides for {@code runDate}.
      *
      * <p>Implementations should be self-contained (own error handling for partial failures)
      * and return an empty list rather than throwing for "nothing today" cases.
+     *
+     * <p>{@code runDate} is the date the pipeline is building a report FOR, which is not always
+     * today: a re-run backfills a past date. Sources that can honour it (KRX serves history back
+     * to 2010) should; realtime-only sources may ignore it.
      */
-    List<RawData> collect();
+    List<RawData> collect(LocalDate runDate);
 }

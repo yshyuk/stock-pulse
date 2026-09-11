@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * Renders a report as Markdown, structured per-stock with sections and tables.
@@ -26,6 +27,9 @@ public class MarkdownRenderer implements ReportRenderer {
         return ReportFormat.MARKDOWN;
     }
 
+    /** The dummy source's name, as reported on every {@link StockMetric} it produces. */
+    private static final String SAMPLE_SOURCE = "dummy";
+
     @Override
     public String render(ReportModel model) {
         StringBuilder sb = new StringBuilder();
@@ -34,6 +38,8 @@ public class MarkdownRenderer implements ReportRenderer {
         sb.append("> 생성 시각: ").append(model.getGeneratedAt()).append("  \n");
         sb.append("> 본 리포트는 **객관적 지표만** 담습니다. 종목에 대한 판단/추천은 포함하지 않으며, ")
                 .append("2차 분석(Claude)에서 수행하세요.\n\n");
+
+        sb.append(provenance(model));
 
         boolean hasMetrics = model.getMetrics() != null && !model.getMetrics().isEmpty();
         boolean hasDisclosures = model.getDisclosures() != null && !model.getDisclosures().isEmpty();
@@ -95,6 +101,35 @@ public class MarkdownRenderer implements ReportRenderer {
         sb.append("위 표를 그대로 Claude에 붙여넣고, 관심 종목/전략 관점에서 해석을 요청하세요. ")
                 .append("이 리포트 자체에는 어떤 매수/매도 신호도 포함되어 있지 않습니다.\n");
 
+        return sb.toString();
+    }
+
+    /**
+     * Where the numbers came from, stated before the numbers themselves.
+     *
+     * <p>Sample data gets a banner rather than a footnote: the incident this guards against was
+     * not that a warning was ignored, but that there was nothing to ignore — a report of
+     * hard-coded prices looked exactly like a real one.
+     */
+    private String provenance(ReportModel model) {
+        if (model.getMetrics() == null || model.getMetrics().isEmpty()) {
+            return "";
+        }
+        List<String> sources = model.getMetrics().stream()
+                .map(StockMetric::getSource)
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+        if (sources.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("> 데이터 출처: ").append(String.join(", ", sources)).append("\n\n");
+        if (sources.contains(SAMPLE_SOURCE)) {
+            sb.append("> ⚠️ **이 리포트에는 샘플 데이터가 포함되어 있습니다. 실제 시세가 아니므로 ")
+                    .append("어떤 판단에도 사용하지 마세요.** (`stockpulse.collector.dummy.enabled`)\n\n");
+        }
         return sb.toString();
     }
 

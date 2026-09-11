@@ -20,6 +20,14 @@ public interface DailyStockSnapshotRepository extends JpaRepository<DailyStockSn
     Optional<DailyStockSnapshot> findBySymbolAndTradeDate(String symbol, LocalDate tradeDate);
 
     /**
+     * Every row already stored for a run date, for the idempotent upsert.
+     *
+     * <p>Whole-market runs upsert ~2,765 symbols; asking per symbol cost one round trip each.
+     * One query for the day is the same information in a single trip.
+     */
+    List<DailyStockSnapshot> findByTradeDate(LocalDate tradeDate);
+
+    /**
      * Prior snapshots for a symbol strictly before {@code tradeDate}, most recent first.
      * Callers pass a {@link Pageable} to bound how far back to read (e.g. ~52 weeks).
      */

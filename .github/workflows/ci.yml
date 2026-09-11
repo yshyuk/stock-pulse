@@ -9,7 +9,9 @@ name: ci
 # build time instead of storage.
 on:
   pull_request:
-    branches: [ main ]
+    # 작업 브랜치 → develop (dev PR), develop → release (release PR) 양쪽을 검증한다.
+    # 구 모델의 main 은 폐지되어 어떤 PR 도 main 을 대상으로 하지 않는다.
+    branches: [ release, develop ]
 
 # Cancel superseded runs on the same ref to save minutes and avoid redundant logs.
 concurrency:

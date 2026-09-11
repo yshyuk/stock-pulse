@@ -30,7 +30,7 @@ class DerivedMetricCalculatorTest {
 
     @Test
     void noPriorHistory_allDerivedNull() {
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), 100L, List.of());
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), null, 100L, List.of());
 
         assertThat(m.getChangeRate1d()).isNull();
         assertThat(m.getStreakDays()).isNull();
@@ -40,60 +40,77 @@ class DerivedMetricCalculatorTest {
     }
 
     @Test
+    void changeRate1d_prefersTheSourceReportedPreviousClose() {
+        // KRX/Naver both report the previous close directly. On a cold start there are no priors
+        // at all, yet the day's change is perfectly well known — using it lets screening rules
+        // work from day one instead of waiting for history to accumulate.
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(110), BigDecimal.valueOf(100), 100L, List.of());
+        assertThat(m.getChangeRate1d()).isEqualByComparingTo("10.0000");
+    }
+
+    @Test
+    void changeRate1d_sourcePreviousCloseWinsOverAStaleSnapshot() {
+        // A gap in our own history (missed runs) makes priors.get(0) NOT yesterday. The source's
+        // previous close always is, so it must win rather than silently producing a wrong "1d".
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(110), BigDecimal.valueOf(100), 100L, priors(50));
+        assertThat(m.getChangeRate1d()).isEqualByComparingTo("10.0000");
+    }
+
+    @Test
     void changeRate1d_usesPreviousDaySnapshot() {
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(110), 100L, priors(100));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(110), null, 100L, priors(100));
         assertThat(m.getChangeRate1d()).isEqualByComparingTo("10.0000");
     }
 
     @Test
     void changeRate5d_nullUntilFivePriorsExist() {
-        assertThat(calc.compute(BigDecimal.valueOf(110), 100L, priors(108, 106, 104, 102)).getChangeRate5d())
+        assertThat(calc.compute(BigDecimal.valueOf(110), null, 100L, priors(108, 106, 104, 102)).getChangeRate5d())
                 .isNull();
         // 5 priors: 5-days-ago price is priors[4] = 100 -> (110-100)/100 = 10%
-        assertThat(calc.compute(BigDecimal.valueOf(110), 100L, priors(108, 106, 104, 102, 100)).getChangeRate5d())
+        assertThat(calc.compute(BigDecimal.valueOf(110), null, 100L, priors(108, 106, 104, 102, 100)).getChangeRate5d())
                 .isEqualByComparingTo("10.0000");
     }
 
     @Test
     void streak_countsConsecutiveUpMovesIncludingToday() {
         // prices desc: today=104, then 103,102,101,100 -> 4 consecutive up moves
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(104), 100L, priors(103, 102, 101, 100));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(104), null, 100L, priors(103, 102, 101, 100));
         assertThat(m.getStreakDays()).isEqualTo(4);
     }
 
     @Test
     void streak_negativeForDownMovesAndStopsAtReversal() {
         // today=100, 101 (down move), 100 (up move -> reversal) => streak of -1
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), 100L, priors(101, 100));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), null, 100L, priors(101, 100));
         assertThat(m.getStreakDays()).isEqualTo(-1);
     }
 
     @Test
     void streak_zeroWhenUnchangedFromPreviousDay() {
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), 100L, priors(100, 99));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), null, 100L, priors(100, 99));
         assertThat(m.getStreakDays()).isZero();
     }
 
     @Test
     void rangePosition_atHighIsOne_atLowIsZero() {
         // priors span 90..110, today=110 (the high) -> position 1
-        assertThat(calc.compute(BigDecimal.valueOf(110), 100L, priors(90, 100)).getRangePosition())
+        assertThat(calc.compute(BigDecimal.valueOf(110), null, 100L, priors(90, 100)).getRangePosition())
                 .isEqualByComparingTo("1.0000");
         // today=90 (the low) -> position 0
-        assertThat(calc.compute(BigDecimal.valueOf(90), 100L, priors(110, 100)).getRangePosition())
+        assertThat(calc.compute(BigDecimal.valueOf(90), null, 100L, priors(110, 100)).getRangePosition())
                 .isEqualByComparingTo("0.0000");
     }
 
     @Test
     void volumeMa20Ratio_nullBelow20Priors_andComputedAt20() {
-        assertThat(calc.compute(BigDecimal.valueOf(100), 200L, priors(100)).getVolumeMa20Ratio()).isNull();
+        assertThat(calc.compute(BigDecimal.valueOf(100), null, 200L, priors(100)).getVolumeMa20Ratio()).isNull();
 
         double[] twenty = new double[20];
         for (int i = 0; i < 20; i++) {
             twenty[i] = 100; // each prior volume defaults to 100 in the helper
         }
         // today volume 200, avg prior volume 100 -> ratio 2.0
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), 200L, priors(twenty));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(100), null, 200L, priors(twenty));
         assertThat(m.getVolumeMa20Ratio()).isEqualByComparingTo("2.0000");
     }
 
@@ -104,7 +121,7 @@ class DerivedMetricCalculatorTest {
         for (int i = 0; i < 20; i++) {
             p[i] = base + (i % 2 == 0 ? 1 : -1); // oscillating prices -> non-zero volatility
         }
-        DerivedMetrics m = calc.compute(BigDecimal.valueOf(101), 100L, priors(p));
+        DerivedMetrics m = calc.compute(BigDecimal.valueOf(101), null, 100L, priors(p));
         assertThat(m.getVolatility20d()).isNotNull();
         assertThat(m.getVolatility20d().signum()).isPositive();
     }

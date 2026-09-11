@@ -13,6 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -55,7 +56,7 @@ public class NaverIndexSource implements DataSource {
     }
 
     @Override
-    public List<RawData> collect() {
+    public List<RawData> collect(LocalDate runDate) {
         StockPulseProperties.NaverIndex cfg = properties.getCollector().getNaverIndex();
         String codes = String.join(",", cfg.getCodes());
         String uri = cfg.getBaseUrl() + "/" + codes;

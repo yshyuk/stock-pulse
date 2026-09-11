@@ -63,6 +63,29 @@
         <string>REPLACE_ME</string>
         <key>DISCORD_WEBHOOK_URL</key>
         <string>REPLACE_ME</string>
+        <!-- ── 실데이터 소스 ────────────────────────────────────────────────
+             이 두 키가 없으면 수집되는 실시세가 하나도 없다. DUMMY_ENABLED 도
+             기본 false 이므로, 비워두면 배치는 리포트를 만들지 못한다. -->
+        <key>NAVER_ENABLED</key>
+        <string>true</string>
+        <!-- 관심 종목 코드(쉼표 구분). 전종목 수집은 KRX_ALL_ENABLED 를 사용한다. -->
+        <key>NAVER_SYMBOLS</key>
+        <string>005930,000660</string>
+        <!-- KRX 전종목 일별시세. 1회 호출로 전 종목을 받는다.
+             켤 때는 STOCKPULSE_SCREENING_ENABLED=true 도 함께 켤 것 —
+             안 그러면 전 종목이 리포트와 Claude 분석으로 그대로 넘어간다. -->
+        <key>KRX_ALL_ENABLED</key>
+        <string>false</string>
+        <!-- openapi.krx.co.kr 발급 인증키. 실제 값은 커밋하지 말 것. -->
+        <key>KRX_API_KEY</key>
+        <string>REPLACE_ME</string>
+        <!-- 인증키 만료일(YYYY-MM-DD). 30/14/7/3/2/1일 전 텔레그램 경보가 발송된다.
+             재발급 시 이 값도 같이 갱신할 것 — 안 하면 경보가 계속 울린다. -->
+        <key>KRX_API_KEY_EXPIRES_AT</key>
+        <string>REPLACE_ME</string>
+        <key>STOCKPULSE_SCREENING_ENABLED</key>
+        <string>false</string>
+
         <key>STOCKPULSE_REPORT_DIR</key>
         <string>/Users/Shared/stock-pulse/reports</string>
         <key>STOCKPULSE_RUN_HOUR</key>

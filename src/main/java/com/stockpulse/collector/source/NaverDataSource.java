@@ -12,6 +12,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -27,7 +28,12 @@ import java.util.Map;
  *
  * <p>Note: the snapshot endpoint exposes today's volume but not the prior day's, so
  * {@code volumeChangeRate} will be blank for Naver-sourced rows (price change rate still
- * computes from the previous close).
+ * computes from the previous close, which is derived as {@code close - change}).
+ *
+ * <p>Field names here were re-verified against the live endpoint on 2026-09-09. Naver had
+ * renamed every field this parser previously read ({@code cd/nm/nv/pcv/aq/cr}), and because the
+ * test fixture was hand-written to match the old names, the source returned nothing while its
+ * test stayed green. Capture fixtures from the real endpoint, never from the parser.
  *
  * <p>This is an undocumented endpoint; treat it as best-effort and expect occasional shape
  * changes. Parsing is defensive so a single bad field doesn't abort the run.
@@ -64,7 +70,7 @@ public class NaverDataSource implements DataSource {
     }
 
     @Override
-    public List<RawData> collect() {
+    public List<RawData> collect(LocalDate runDate) {
         StockPulseProperties.Naver cfg = properties.getCollector().getNaver();
         String codes = String.join(",", cfg.getSymbols());
         String uri = cfg.getBaseUrl() + "/" + codes;
@@ -92,15 +98,16 @@ public class NaverDataSource implements DataSource {
 
         List<RawData> items = new ArrayList<>();
         Instant now = Instant.now(clock);
+        int skipped = 0;
         for (JsonNode q : quotes) {
-            try {
-                items.add(toRawData(q, now));
-            } catch (Exception e) {
-                log.warn("[collector:naver] skipping malformed quote '{}': {}",
-                        q.path("cd").asText("?"), e.getMessage());
+            RawData item = toRawData(q, now);
+            if (item == null) {
+                skipped++;
+                continue;
             }
+            items.add(item);
         }
-        log.info("[collector:naver] fetched {} quote(s)", items.size());
+        log.info("[collector:naver] fetched {} quote(s), skipped {}", items.size(), skipped);
         return items;
     }
 
@@ -118,23 +125,62 @@ public class NaverDataSource implements DataSource {
         return quotes;
     }
 
+    /** One quote, or null when it carries no usable price (e.g. a suspended ticker). */
     private RawData toRawData(JsonNode q, Instant now) {
+        String symbol = text(q, "itemCode", "symbolCode");
+        Long price = num(q, "closePriceRaw", "closePrice");
+        if (symbol == null || price == null) {
+            return null;
+        }
+        // Naver reports the day-over-day CHANGE, not the previous close. The value is signed,
+        // so subtracting it works in both directions (a falling stock's change is negative).
+        Long change = num(q, "compareToPreviousClosePriceRaw", "compareToPreviousClosePrice");
+
         Map<String, Object> payload = new HashMap<>();
-        payload.put("price", num(q, "nv"));          // 현재가
-        payload.put("previousPrice", num(q, "pcv")); // 전일 종가
-        payload.put("volume", num(q, "aq"));         // 누적 거래량
-        // previousVolume not available from this endpoint → volumeChangeRate stays blank.
+        payload.put("price", price);
+        payload.put("volume", num(q, "accumulatedTradingVolumeRaw", "accumulatedTradingVolume"));
+        if (change != null) {
+            payload.put("previousPrice", price - change);
+        }
+        // previousVolume is not exposed by this endpoint → volumeChangeRate stays blank.
+        String name = text(q, "stockName");
         return RawData.builder()
                 .sourceName(sourceName())
-                .symbol(q.path("cd").asText(null))
-                .name(q.path("nm").asText(null))
+                .symbol(symbol)
+                .name(name == null ? symbol : name)
                 .fetchedAt(now)
                 .payload(payload)
                 .build();
     }
 
-    private Long num(JsonNode q, String field) {
-        JsonNode n = q.path(field);
-        return n.isMissingNode() || n.isNull() ? null : n.asLong();
+    private String text(JsonNode q, String... fields) {
+        for (String f : fields) {
+            JsonNode n = q.path(f);
+            if (!n.isMissingNode() && !n.isNull() && !n.asText().isBlank()) {
+                return n.asText().trim();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Reads the first present field as a whole number. The {@code *Raw} variants are unformatted;
+     * the display variants are grouped ("13,958,538") and are only a fallback.
+     */
+    private Long num(JsonNode q, String... fields) {
+        String raw = text(q, fields);
+        if (raw == null) {
+            return null;
+        }
+        String cleaned = raw.replace(",", "").replace("+", "").trim();
+        if (cleaned.isEmpty() || cleaned.equals("-")) {
+            return null;
+        }
+        try {
+            return Long.valueOf(cleaned);
+        } catch (NumberFormatException e) {
+            log.warn("[collector:naver] unparseable number '{}'", raw);
+            return null;
+        }
     }
 }

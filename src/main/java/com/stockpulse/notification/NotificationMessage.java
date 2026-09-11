@@ -23,6 +23,8 @@ public class NotificationMessage {
 
     public enum Severity {
         SUCCESS,
+        /** Nothing is broken yet, but it will be unless someone acts. */
+        WARNING,
         FAILURE
     }
 }
