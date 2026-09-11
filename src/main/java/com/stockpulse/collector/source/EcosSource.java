@@ -58,7 +58,7 @@ public class EcosSource implements DataSource {
     }
 
     @Override
-    public List<RawData> collect() {
+    public List<RawData> collect(LocalDate runDate) {
         StockPulseProperties.Ecos cfg = properties.getCollector().getEcos();
         LocalDate today = LocalDate.now(clock);
         String from = today.minusDays(cfg.getLookbackDays()).format(YMD);

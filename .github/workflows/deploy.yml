@@ -4,7 +4,9 @@ name: deploy
 # No daemon restart is needed — launchd starts the NEW jar at the next dawn run.
 on:
   push:
-    branches: [ main ]
+    # release 가 프로덕션 트렁크이자 GitHub 기본 브랜치다. 구 모델의 main 은 폐지되어
+    # 더 이상 갱신되지 않으므로, 이전 설정으로는 배포가 영영 트리거되지 않았다.
+    branches: [ release ]
   workflow_dispatch: {}
 
 jobs:

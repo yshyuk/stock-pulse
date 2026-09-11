@@ -5,6 +5,7 @@ import com.stockpulse.analysis.ReportAnalyzer;
 import com.stockpulse.collector.CollectionResult;
 import com.stockpulse.collector.CollectorService;
 import com.stockpulse.config.StockPulseProperties;
+import com.stockpulse.credential.CredentialExpiryChecker;
 import com.stockpulse.domain.Disclosure;
 import com.stockpulse.domain.RawData;
 import com.stockpulse.domain.Report;
@@ -22,6 +23,8 @@ import com.stockpulse.plan.TradingPlan;
 import com.stockpulse.plan.dispatch.DispatchResult;
 import com.stockpulse.plan.dispatch.PlanDispatcher;
 import com.stockpulse.report.ReportService;
+import com.stockpulse.screening.ScreeningResult;
+import com.stockpulse.screening.ScreeningStage;
 import com.stockpulse.storage.ReportStore;
 import com.stockpulse.timeseries.DailyStockSnapshot;
 import com.stockpulse.timeseries.SnapshotService;
@@ -40,8 +43,11 @@ import java.util.List;
  * Orchestrates the dawn pipeline as a single pass:
  *
  * <pre>
- *   collect -> process -> render report -> (analyze: NoOp) -> store(file+db) -> notify
+ *   collect -> process -> [empty-run guard] -> render report -> (analyze) -> store -> notify
  * </pre>
+ *
+ * <p>The empty-run guard is what stops a misconfigured run from succeeding quietly: no prices on
+ * a trading day fails the batch, no prices on a weekend exits without a report.
  *
  * <p>On success it broadcasts a SUCCESS notification with the report; on any failure it
  * broadcasts a FAILURE notification (no silent failures) and rethrows so the caller can
@@ -53,14 +59,17 @@ public class BatchPipeline {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
+    private final CredentialExpiryChecker credentialExpiryChecker;
     private final CollectorService collectorService;
     private final MetricProcessor metricProcessor;
     private final DisclosureProcessor disclosureProcessor;
     private final SnapshotService snapshotService;
+    private final EmptyRunPolicy emptyRunPolicy;
     private final MarketStage marketStage;
     private final PlanStage planStage;
     private final PlanDispatcher planDispatcher;
     private final IntradayReviewReporter intradayReviewReporter;
+    private final ScreeningStage screeningStage;
     private final ReportService reportService;
     private final ReportAnalyzer reportAnalyzer;
     private final List<ReportStore> reportStores;
@@ -68,28 +77,34 @@ public class BatchPipeline {
     private final StockPulseProperties properties;
     private final Clock clock;
 
-    public BatchPipeline(CollectorService collectorService,
+    public BatchPipeline(CredentialExpiryChecker credentialExpiryChecker,
+                         CollectorService collectorService,
                          MetricProcessor metricProcessor,
                          DisclosureProcessor disclosureProcessor,
                          SnapshotService snapshotService,
+                         EmptyRunPolicy emptyRunPolicy,
                          MarketStage marketStage,
                          PlanStage planStage,
                          PlanDispatcher planDispatcher,
                          IntradayReviewReporter intradayReviewReporter,
+                         ScreeningStage screeningStage,
                          ReportService reportService,
                          ReportAnalyzer reportAnalyzer,
                          List<ReportStore> reportStores,
                          NotificationService notificationService,
                          StockPulseProperties properties,
                          Clock clock) {
+        this.credentialExpiryChecker = credentialExpiryChecker;
         this.collectorService = collectorService;
         this.metricProcessor = metricProcessor;
         this.disclosureProcessor = disclosureProcessor;
         this.snapshotService = snapshotService;
+        this.emptyRunPolicy = emptyRunPolicy;
         this.marketStage = marketStage;
         this.planStage = planStage;
         this.planDispatcher = planDispatcher;
         this.intradayReviewReporter = intradayReviewReporter;
+        this.screeningStage = screeningStage;
         this.reportService = reportService;
         this.reportAnalyzer = reportAnalyzer;
         this.reportStores = reportStores;
@@ -118,14 +133,35 @@ public class BatchPipeline {
         Instant start = Instant.now();
         log.info("==== StockPulse batch pipeline START (runDate={}) ====", runDate);
         try {
+            // 0) credentials: advance notice, before anything that could fail because of one.
+            //    Runs on every day including weekends — a key expiring on a Saturday still needs
+            //    the same lead time, and this has nothing to do with whether the market opened.
+            notifyCredentialWarnings(runDate);
+
             // 1) collect
-            CollectionResult collected = collectorService.collectAll();
+            CollectionResult collected = collectorService.collectAll(runDate);
             List<RawData> raw = collected.items();
             boolean degraded = collected.hasRequiredFailure();
 
             // 2) process (objective metrics + disclosures)
             List<StockMetric> metrics = metricProcessor.process(raw);
             List<Disclosure> disclosures = disclosureProcessor.process(raw);
+
+            // 2a) no prices at all? Decide BEFORE doing any further work. A run that collected
+            //     nothing must never look like a normal run — that is exactly how hard-coded
+            //     sample data once reached a production report unnoticed.
+            switch (emptyRunPolicy.decide(runDate, metrics.size())) {
+                case SKIP -> {
+                    log.info("==== StockPulse batch SKIPPED: {} is a non-trading day and no prices "
+                            + "were collected (expected) ====", runDate);
+                    return;
+                }
+                case FAIL -> throw new IllegalStateException(
+                        "No price data collected for trading day " + runDate
+                                + " — check that a price source is enabled (NAVER_ENABLED / KRX_ALL_ENABLED). "
+                                + "Collected " + raw.size() + " raw item(s) from all sources.");
+                case PROCEED -> { /* normal path */ }
+            }
 
             // 2b) time-series: upsert daily snapshots + derived metrics (idempotent on runDate)
             List<DailyStockSnapshot> snapshots = snapshotService.record(runDate, metrics);
@@ -143,8 +179,14 @@ public class BatchPipeline {
                         collected.failedRequiredSources());
             }
 
+            // 2d) screening: narrow what reaches the (token-billed) report and second-stage
+            //      analysis. Cost control only — the plan stage above deliberately still sees
+            //      every snapshot, so a capped report never silently drops a plan candidate.
+            ScreeningResult screened = screeningStage.select(snapshots, metrics);
+
             // 3) render report (Markdown), then append market context / plan / intraday-review sections
-            Report report = reportService.generate(metrics, disclosures, runDate);
+            Report report = reportService.generate(screened.metrics(), disclosures, runDate);
+            report = appendSection(report, screeningStage.summaryMarkdown(screened));
             report = appendSection(report, marketStage.summaryMarkdown(marketSnapshots));
             // M4 feedback loop: yesterday's intraday execution results in this morning's report.
             report = appendSection(report, intradayReviewReporter.morningSection(runDate));
@@ -180,7 +222,7 @@ public class BatchPipeline {
             DispatchResult dispatch = planDispatcher.dispatch(plan);
 
             // 6) notify success — surfacing a failed hand-off, which is otherwise invisible
-            notificationService.broadcast(successMessage(report, metrics.size(), start, dispatch));
+            notificationService.broadcast(successMessage(report, screened, start, dispatch));
 
             log.info("==== StockPulse batch pipeline SUCCESS in {} ====", elapsed(start));
         } catch (Exception e) {
@@ -188,6 +230,31 @@ public class BatchPipeline {
             // Never fail silently.
             safeNotifyFailure(e, start);
             throw e;
+        }
+    }
+
+    /**
+     * Sends credential expiry warnings as their own message.
+     *
+     * <p>Deliberately not folded into the success notification: that one carries the whole report
+     * and a line about a key would be lost in it. Never fatal — failing the batch because we
+     * could not warn about a future problem would be its own bug.
+     */
+    private void notifyCredentialWarnings(LocalDate runDate) {
+        try {
+            List<String> warnings = credentialExpiryChecker.warnings(runDate);
+            if (warnings.isEmpty()) {
+                return;
+            }
+            notificationService.broadcast(NotificationMessage.builder()
+                    .severity(NotificationMessage.Severity.WARNING)
+                    .title("🔑 StockPulse 인증키 만료 예정")
+                    .body(String.join("\n\n", warnings)
+                            + "\n\n재발급: https://openapi.krx.co.kr (마이페이지 > API 인증키 신청)\n"
+                            + "인증키 발급 후 '서비스 이용 > API 이용신청'까지 해야 실제로 호출됩니다.")
+                    .build());
+        } catch (Exception e) {
+            log.error("[pipeline] credential expiry check failed: {}", e.getMessage(), e);
         }
     }
 
@@ -241,12 +308,12 @@ public class BatchPipeline {
                 .build();
     }
 
-    private NotificationMessage successMessage(Report report, int stockCount, Instant start,
+    private NotificationMessage successMessage(Report report, ScreeningResult screened, Instant start,
                                                DispatchResult dispatch) {
         Path reportFile = Path.of(properties.getReportDir())
                 .resolve(report.getReportDate().format(DATE) + report.getFormat().fileExtension());
         String title = "✅ StockPulse 리포트 생성 완료 (" + report.getReportDate().format(DATE) + ")";
-        String body = "종목 " + stockCount + "건, 소요 " + elapsed(start)
+        String body = "종목 " + stockCountNotice(screened) + ", 소요 " + elapsed(start)
                 + dispatchNotice(dispatch) + "\n\n" + report.getContent();
         return NotificationMessage.builder()
                 .severity(NotificationMessage.Severity.SUCCESS)
@@ -254,6 +321,15 @@ public class BatchPipeline {
                 .body(body)
                 .attachmentPath(reportFile.toAbsolutePath().toString())
                 .build();
+    }
+
+    /** "N건" normally; "전체 N건 중 M건" once screening is actually narrowing the list. */
+    private String stockCountNotice(ScreeningResult screened) {
+        int shown = screened.metrics().size();
+        if (shown == screened.totalEvaluated()) {
+            return shown + "건";
+        }
+        return "전체 " + screened.totalEvaluated() + "건 중 " + shown + "건";
     }
 
     /**

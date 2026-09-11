@@ -3,23 +3,28 @@ package com.stockpulse.collector.source;
 import com.stockpulse.collector.DataSource;
 import com.stockpulse.domain.RawData;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
 /**
  * The single placeholder {@link DataSource} so the pipeline runs end-to-end today.
  *
- * <p>It returns a couple of hard-coded rows. Replace / add real sources (DART, Naver, news)
- * as separate beans; this one can stay for smoke-testing or be disabled via config.
+ * <p>It returns a couple of hard-coded rows. OPT-IN ONLY
+ * ({@code stockpulse.collector.dummy.enabled=true}): with it on by default a run with no real
+ * source configured still exits 0 and produces a plausible-looking report of invented prices —
+ * a silent failure that reached production once. Keep it for smoke tests, never for a real run.
  *
  * <p>TODO: real sources should use the shared {@code WebClient}
  * ({@link com.stockpulse.config.WebClientConfig}) to call external APIs.
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "stockpulse.collector.dummy", name = "enabled", havingValue = "true")
 public class DummyDataSource implements DataSource {
 
     @Override
@@ -33,7 +38,7 @@ public class DummyDataSource implements DataSource {
     }
 
     @Override
-    public List<RawData> collect() {
+    public List<RawData> collect(LocalDate runDate) {
         log.info("[collector] DummyDataSource producing sample rows (replace with real sources)");
         Instant now = Instant.now();
         return List.of(

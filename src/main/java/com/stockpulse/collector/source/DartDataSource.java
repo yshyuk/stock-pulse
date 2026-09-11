@@ -59,7 +59,7 @@ public class DartDataSource implements DataSource {
     }
 
     @Override
-    public List<RawData> collect() {
+    public List<RawData> collect(LocalDate runDate) {
         StockPulseProperties.Dart cfg = properties.getCollector().getDart();
         LocalDate today = LocalDate.now(clock);
         LocalDate begin = today.minusDays(Math.max(0, cfg.getLookbackDays() - 1));

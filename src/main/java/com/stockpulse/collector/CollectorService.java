@@ -4,6 +4,7 @@ import com.stockpulse.domain.RawData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,7 +25,7 @@ public class CollectorService {
         this.dataSources = dataSources;
     }
 
-    public CollectionResult collectAll() {
+    public CollectionResult collectAll(LocalDate runDate) {
         List<RawData> aggregated = new ArrayList<>();
         List<String> failedRequired = new ArrayList<>();
         for (DataSource source : dataSources) {
@@ -33,7 +34,7 @@ public class CollectorService {
                 continue;
             }
             try {
-                List<RawData> items = source.collect();
+                List<RawData> items = source.collect(runDate);
                 log.info("[collector] source '{}' returned {} item(s)", source.sourceName(), items.size());
                 aggregated.addAll(items);
             } catch (Exception e) {

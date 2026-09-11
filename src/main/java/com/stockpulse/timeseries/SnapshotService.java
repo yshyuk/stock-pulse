@@ -11,6 +11,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -50,7 +52,14 @@ public class SnapshotService {
     public List<DailyStockSnapshot> record(LocalDate runDate, List<StockMetric> metrics) {
         int window = properties.getTimeseries().getHistoryWindowDays();
         Instant now = Instant.now(clock);
-        List<DailyStockSnapshot> saved = new ArrayList<>();
+        // One trip for the whole day's existing rows instead of one per symbol. At whole-market
+        // scale that is ~2,765 round trips removed from every run.
+        Map<String, DailyStockSnapshot> existingBySymbol = new HashMap<>();
+        for (DailyStockSnapshot existing : repository.findByTradeDate(runDate)) {
+            existingBySymbol.put(existing.getSymbol(), existing);
+        }
+
+        List<DailyStockSnapshot> toSave = new ArrayList<>();
 
         for (StockMetric m : metrics) {
             if (m.getSymbol() == null || m.getPrice() == null) {
@@ -60,14 +69,16 @@ public class SnapshotService {
                     .findBySymbolAndTradeDateLessThanOrderByTradeDateDesc(
                             m.getSymbol(), runDate, PageRequest.of(0, window));
 
-            DerivedMetrics derived = calculator.compute(m.getPrice(), m.getVolume(), priors);
+            DerivedMetrics derived = calculator.compute(
+                    m.getPrice(), m.getPreviousPrice(), m.getVolume(), priors);
 
-            DailyStockSnapshot snapshot = repository
-                    .findBySymbolAndTradeDate(m.getSymbol(), runDate)
-                    .orElseGet(() -> DailyStockSnapshot.builder()
-                            .symbol(m.getSymbol())
-                            .tradeDate(runDate)
-                            .build());
+            DailyStockSnapshot snapshot = existingBySymbol.get(m.getSymbol());
+            if (snapshot == null) {
+                snapshot = DailyStockSnapshot.builder()
+                        .symbol(m.getSymbol())
+                        .tradeDate(runDate)
+                        .build();
+            }
 
             snapshot.setName(m.getName());
             snapshot.setPrice(m.getPrice());
@@ -77,9 +88,10 @@ public class SnapshotService {
             snapshot.setSource(m.getSource() == null ? "unknown" : m.getSource());
             snapshot.setCollectedAt(now);
 
-            saved.add(repository.save(snapshot));
+            toSave.add(snapshot);
         }
 
+        List<DailyStockSnapshot> saved = repository.saveAll(toSave);
         log.info("[timeseries] upserted {} snapshot(s) for {}", saved.size(), runDate);
         return saved;
     }

@@ -37,7 +37,7 @@ class CollectorServiceTest {
             return required;
         }
 
-        public List<RawData> collect() {
+        public List<RawData> collect(java.time.LocalDate runDate) {
             if (throwing) {
                 throw new RuntimeException("boom");
             }
@@ -51,7 +51,7 @@ class CollectorServiceTest {
         CollectorService service = new CollectorService(List.of(
                 new FakeSource("naver", true, true, true)));
 
-        CollectionResult result = service.collectAll();
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
 
         assertThat(result.hasRequiredFailure()).isTrue();
         assertThat(result.failedRequiredSources()).containsExactly("naver");
@@ -63,7 +63,7 @@ class CollectorServiceTest {
                 new FakeSource("news", true, false, true),      // optional, fails
                 new FakeSource("dummy", true, false, false)));   // optional, ok
 
-        CollectionResult result = service.collectAll();
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
 
         assertThat(result.hasRequiredFailure()).isFalse();
         assertThat(result.items()).hasSize(1); // dummy still contributed
@@ -74,7 +74,7 @@ class CollectorServiceTest {
         CollectorService service = new CollectorService(List.of(
                 new FakeSource("naver", false, true, true))); // disabled — not run, not counted
 
-        CollectionResult result = service.collectAll();
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
 
         assertThat(result.hasRequiredFailure()).isFalse();
         assertThat(result.items()).isEmpty();
