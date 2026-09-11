@@ -7,8 +7,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Strongly-typed binding for the {@code stockpulse.*} configuration tree.
@@ -47,6 +50,12 @@ public class StockPulseProperties {
 
     @NestedConfigurationProperty
     private Plan plan = new Plan();
+
+    @NestedConfigurationProperty
+    private Screening screening = new Screening();
+
+    @NestedConfigurationProperty
+    private Credentials credentials = new Credentials();
 
     @NestedConfigurationProperty
     private Heartbeat heartbeat = new Heartbeat();
@@ -144,6 +153,49 @@ public class StockPulseProperties {
         private int maxDataGapDays = 4;
     }
 
+    /**
+     * Screening settings: which stocks are worth the (token-billed) report and second-stage
+     * analysis. This is a COST CONTROL, not an investment judgement — see
+     * {@code docs/superpowers/specs/2026-09-09-screening-stage-design.md}.
+     */
+    @Getter
+    @Setter
+    public static class Screening {
+        /** When false the stage passes every stock through unchanged (current watchlist behaviour). */
+        private boolean enabled = false;
+
+        /** Hard cap on how many stocks reach the report. Bounds the daily Claude bill. */
+        private int maxCandidates = 30;
+
+        /**
+         * Minimum trading value (price x volume, KRW) to be screened at all. Without this floor,
+         * thinly traded stocks trip volume-ratio rules trivially and crowd out the list.
+         */
+        private BigDecimal minTradingValue = new BigDecimal("1000000000");
+
+        /** Anomaly rules. A stock is a candidate if it matches AT LEAST ONE (rules are ORed). */
+        private List<PlanRule> rules = new ArrayList<>();
+    }
+
+    /**
+     * Expiry dates for credentials that silently stop working when they lapse.
+     *
+     * <p>An expired key is already loud — the batch fails and notifies. What this adds is LEAD
+     * TIME: renewing a KRX key means logging in, requesting, waiting about a day for approval,
+     * and re-applying per API. Finding out the morning it breaks costs at least a day of data.
+     *
+     * <p>Dates have to be configured by hand because no provider returns its own expiry.
+     */
+    @Getter
+    @Setter
+    public static class Credentials {
+        /** Start warning this many days before expiry. */
+        private int warnBeforeDays = 30;
+
+        /** Credential name -> expiry date (ISO). Absent or blank = never warn about it. */
+        private Map<String, LocalDate> expiry = new LinkedHashMap<>();
+    }
+
     /** How the entry price is derived from the current price. */
     @Getter
     @Setter
@@ -169,6 +221,8 @@ public class StockPulseProperties {
     @Setter
     public static class Collector {
         @NestedConfigurationProperty
+        private Dummy dummy = new Dummy();
+        @NestedConfigurationProperty
         private Dart dart = new Dart();
         @NestedConfigurationProperty
         private Naver naver = new Naver();
@@ -177,7 +231,7 @@ public class StockPulseProperties {
         @NestedConfigurationProperty
         private Ecos ecos = new Ecos();
         @NestedConfigurationProperty
-        private Krx krx = new Krx();
+        private KrxAll krxAll = new KrxAll();
     }
 
     /** Naver Finance index polling (KOSPI/KOSDAQ). Unofficial endpoint; off by default. */
@@ -209,17 +263,33 @@ public class StockPulseProperties {
         private int lookbackDays = 7;
     }
 
-    /** KRX (data.krx.co.kr) investor supply/demand (foreign/institution net buy). Off by default. */
+        /**
+     * KRX all-listed daily quotes (data.krx.co.kr). One POST returns every KOSPI/KOSDAQ stock,
+     * which is what makes whole-market collection cheap. Off by default — turning it on without
+     * {@code stockpulse.screening.enabled} sends ~2,800 stocks to the report and Claude.
+     */
     @Getter
     @Setter
-    public static class Krx {
+    public static class KrxAll {
         private boolean enabled = false;
-        /** KRX JSON data endpoint. */
-        private String baseUrl = "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd";
-        /** The KRX "bld" identifier for the investor trading dataset. */
-        private String bld = "dbms/MDC/STAT/standard/MDCSTAT02203";
-        /** Market id (STK=KOSPI, KSQ=KOSDAQ). */
-        private String marketId = "STK";
+
+        /** KRX Open API auth key, sent as the {@code AUTH_KEY} header. Env-injected, never committed. */
+        private String apiKey;
+
+        private String baseUrl = "https://data-dbg.krx.co.kr/svc/apis/sto";
+
+        /**
+         * One endpoint per market — there is no all-market endpoint, so KOSPI and KOSDAQ are
+         * fetched separately and merged (943 + 1,822 = ~2,765 stocks as of 2026-09).
+         */
+        private List<String> endpoints = new ArrayList<>(List.of("stk_bydd_trd", "ksq_bydd_trd"));
+
+        /**
+         * How many days back to look for the most recent session with data. KRX publishes after
+         * the close, so a dawn run must ask for a PRIOR day; weekends and holidays return zero
+         * rows, and walking back finds the last real session without needing a market calendar.
+         */
+        private int maxLookbackDays = 7;
     }
 
     /** Naver Finance realtime price source (unofficial polling endpoint). Off by default. */
@@ -232,6 +302,16 @@ public class StockPulseProperties {
         private String baseUrl = "https://polling.finance.naver.com/api/realtime/domestic/stock";
         /** Stock codes to track, e.g. ["005930", "000660"]. */
         private List<String> symbols = new ArrayList<>();
+    }
+
+    /**
+     * Hard-coded sample source, for smoke-testing the pipeline only. Off by default: a run that
+     * silently falls back to invented prices is worse than a run that produces nothing.
+     */
+    @Getter
+    @Setter
+    public static class Dummy {
+        private boolean enabled = false;
     }
 
     /** OpenDART (dart.fss.or.kr) disclosure source. Off by default. */

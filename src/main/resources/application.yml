@@ -37,6 +37,58 @@ stockpulse:
     max-budget-per-symbol-krw: ${STOCKPULSE_PLAN_MAX_PER_SYMBOL:500000}
     max-total-budget-krw: ${STOCKPULSE_PLAN_MAX_TOTAL:2000000}
     max-data-gap-days: ${STOCKPULSE_PLAN_MAX_GAP_DAYS:4}
+  # 전종목 수집 시 리포트/2차분석(Claude)에 넘길 종목을 좁히는 비용 통제 장치.
+  # 투자 판단이 아니라 "오늘 평소와 다른 종목"을 뽑는 이상징후 탐지다.
+  # 기본 off — 워치리스트 운영 중에는 전 종목이 그대로 통과한다.
+  screening:
+    enabled: ${STOCKPULSE_SCREENING_ENABLED:false}
+    # 리포트에 실릴 최대 종목 수. 하루 Claude 비용의 상한을 결정한다.
+    max-candidates: ${STOCKPULSE_SCREENING_MAX:30}
+    # 거래대금(현재가 x 거래량) 하한. 이게 없으면 평소 거래가 거의 없는 종목이
+    # 거래량 배수 룰에 쉽게 걸려 목록을 잠식한다.
+    min-trading-value: ${STOCKPULSE_SCREENING_MIN_VALUE:1000000000}
+    # 룰 간 OR. 하나라도 걸리면 후보. 상승/하락 어느 쪽으로도 편향을 두지 않는다.
+    rules:
+      - id: surge-up
+        description: "전일 대비 5% 이상 상승"
+        conditions:
+          - {metric: changeRate1d, op: GTE, value: 5.0}
+      - id: surge-down
+        description: "전일 대비 5% 이상 하락"
+        conditions:
+          - {metric: changeRate1d, op: LTE, value: -5.0}
+      - id: volume-spike
+        description: "거래량이 20일 평균의 3배 이상"
+        conditions:
+          - {metric: volumeMa20Ratio, op: GTE, value: 3.0}
+      - id: streak-up
+        description: "4일 연속 상승"
+        conditions:
+          - {metric: streakDays, op: GTE, value: 4}
+      - id: streak-down
+        description: "4일 연속 하락"
+        conditions:
+          - {metric: streakDays, op: LTE, value: -4}
+      - id: volatility-expand
+        description: "20일 변동성 5% 이상"
+        conditions:
+          - {metric: volatility20d, op: GTE, value: 5.0}
+      - id: near-high
+        description: "누적 고저 범위 상단 5% 이내"
+        conditions:
+          - {metric: rangePosition, op: GTE, value: 0.95}
+      - id: near-low
+        description: "누적 고저 범위 하단 5% 이내"
+        conditions:
+          - {metric: rangePosition, op: LTE, value: 0.05}
+  # 인증키 만료 사전 경보. 만료 자체는 이미 배치 실패로 알려지지만,
+  # KRX 키 재발급은 신청 → 승인 대기(약 1일) → API별 이용신청이 필요해 리드타임이 있어야 한다.
+  # 만료일은 제공처가 알려주지 않으므로 직접 적어야 하며, 비워두면 해당 키는 경보하지 않는다.
+  # 30/14/7/3/2/1일 전에만 발송하고(매일 스팸 방지), 만료 후에는 매일 발송한다.
+  credentials:
+    warn-before-days: ${STOCKPULSE_CRED_WARN_DAYS:30}
+    expiry:
+      krx-api-key: ${KRX_API_KEY_EXPIRES_AT:}
   # 완성된 플랜을 stock-api SignalIngest 로 전송 (stock-api ADR-002).
   # 기본 off. 전송 실패는 배치 실패가 아니며 "오늘 agent 신호 없음"으로 fail-safe 처리된다.
   dispatch:
@@ -61,6 +113,10 @@ stockpulse:
     daily-loss-limit-krw: ${STOCKPULSE_INTRADAY_DAILY_LOSS:100000}
     kill-switch-file: ${STOCKPULSE_INTRADAY_KILL_FILE:}
   collector:
+    # 하드코딩된 샘플 데이터. 파이프라인 스모크 테스트 전용이며 기본 off.
+    # 켜두면 실소스가 없어도 배치가 "성공"하고 그럴듯한 가짜 리포트가 나온다. 실운영에서 절대 켜지 말 것.
+    dummy:
+      enabled: ${DUMMY_ENABLED:false}
     dart:
       # When true (and an API key is set), DartDataSource pulls OpenDART disclosures.
       enabled: ${DART_ENABLED:false}
@@ -80,9 +136,15 @@ stockpulse:
     ecos:
       enabled: ${ECOS_ENABLED:false}
       api-key: ${ECOS_API_KEY:}
-    # Investor supply/demand (foreign/institution net buy) via KRX. Off by default; experimental.
-    krx:
-      enabled: ${KRX_ENABLED:false}
+    # KRX 공식 Open API 전종목 일별시세 (코스피 943 + 코스닥 1,822 = 약 2,765종목).
+    # 인증키는 openapi.krx.co.kr 에서 무료 발급 + API별 '이용신청'이 별도로 필요하다.
+    # 주의: 이걸 켜면서 stockpulse.screening.enabled를 안 켜면 전 종목이
+    # 리포트와 Claude 분석으로 그대로 넘어간다(비용 폭증 + 출력 잘림).
+    krx-all:
+      enabled: ${KRX_ALL_ENABLED:false}
+      api-key: ${KRX_API_KEY:}
+      # KRX는 장 마감 후에 게시하므로 당일 조회는 0건이다. 직전 거래일까지 거슬러 올라간다.
+      max-lookback-days: ${KRX_ALL_LOOKBACK_DAYS:7}
   notification:
     telegram:
       bot-token: ${TELEGRAM_BOT_TOKEN:}
