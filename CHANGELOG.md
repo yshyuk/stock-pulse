@@ -5,6 +5,18 @@
 
 ---
 
+## [0.3.1] - 2026-09-13
+
+### 버그 수정
+- **소스 간 종목 중복으로 배치가 실패하던 문제**: KRX(전종목)와 네이버(워치리스트)를 동시에
+  활성화하면 워치리스트 종목이 두 번 수집되는데, `daily_stock_snapshot`이
+  `(symbol, trade_date)` 유니크라 upsert가 제약을 위반해 런 전체가 죽었다.
+  `MetricProcessor`에서 심볼당 하나만 남기고, 채택 소스는
+  `stockpulse.collector.source-priority`로 결정한다(기본 `krx-all > naver-finance > dummy`).
+  도착 순서는 동순위일 때만 쓰므로 재실행 결과가 동일하며, 어느 쪽을 버렸는지 WARN으로 남긴다.
+
+---
+
 ## [0.3.0] - 2026-09-11
 
 ### 중대 결함 수정 (데이터 신뢰성)

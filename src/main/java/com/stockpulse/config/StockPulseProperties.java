@@ -220,6 +220,18 @@ public class StockPulseProperties {
     @Getter
     @Setter
     public static class Collector {
+        /**
+         * Which source wins when two of them report the same stock on the same day.
+         *
+         * <p>Sources overlap by design: KRX covers every listed stock while Naver covers a
+         * watchlist, so enabling both means the watchlist symbols arrive twice. The snapshot
+         * table is unique on (symbol, trade_date), so an un-deduplicated run fails outright.
+         *
+         * <p>Earlier in the list wins. A source not listed here ranks below every listed one.
+         */
+        private List<String> sourcePriority =
+                new ArrayList<>(List.of("krx-all", "naver-finance", "dummy"));
+
         @NestedConfigurationProperty
         private Dummy dummy = new Dummy();
         @NestedConfigurationProperty

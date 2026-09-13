@@ -113,6 +113,11 @@ stockpulse:
     daily-loss-limit-krw: ${STOCKPULSE_INTRADAY_DAILY_LOSS:100000}
     kill-switch-file: ${STOCKPULSE_INTRADAY_KILL_FILE:}
   collector:
+    # 같은 종목을 두 소스가 보고할 때 어느 쪽을 채택할지. 앞에 있을수록 우선.
+    # KRX는 전종목, 네이버는 워치리스트라 둘 다 켜면 워치리스트 종목이 중복된다.
+    # daily_stock_snapshot이 (symbol, trade_date) 유니크라 중복을 그대로 넘기면 배치가 죽는다.
+    # 목록에 없는 소스는 모든 등재 소스보다 뒤로 밀린다.
+    source-priority: ${STOCKPULSE_SOURCE_PRIORITY:krx-all,naver-finance,dummy}
     # 하드코딩된 샘플 데이터. 파이프라인 스모크 테스트 전용이며 기본 off.
     # 켜두면 실소스가 없어도 배치가 "성공"하고 그럴듯한 가짜 리포트가 나온다. 실운영에서 절대 켜지 말 것.
     dummy:
