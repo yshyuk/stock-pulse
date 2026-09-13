@@ -1,5 +1,6 @@
 package com.stockpulse.processor;
 
+import com.stockpulse.config.StockPulseProperties;
 import com.stockpulse.domain.RawData;
 import com.stockpulse.domain.StockMetric;
 import lombok.extern.slf4j.Slf4j;
@@ -8,7 +9,9 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Processor stage: turns raw collected items into OBJECTIVE per-stock metrics.
@@ -23,6 +26,12 @@ import java.util.List;
 public class MetricProcessor {
 
     private static final int SCALE = 2;
+
+    private final StockPulseProperties properties;
+
+    public MetricProcessor(StockPulseProperties properties) {
+        this.properties = properties;
+    }
 
     public List<StockMetric> process(List<RawData> rawData) {
         List<StockMetric> metrics = new ArrayList<>();
@@ -42,8 +51,54 @@ public class MetricProcessor {
                 log.warn("[processor] could not compute metrics for '{}': {}", raw.getSymbol(), e.getMessage());
             }
         }
-        log.info("[processor] computed {} stock metric(s)", metrics.size());
-        return metrics;
+        List<StockMetric> deduplicated = deduplicateBySymbol(metrics);
+        log.info("[processor] computed {} stock metric(s){}", deduplicated.size(),
+                metrics.size() == deduplicated.size()
+                        ? "" : " (" + (metrics.size() - deduplicated.size()) + " duplicate(s) dropped)");
+        return deduplicated;
+    }
+
+    /**
+     * One metric per symbol, keeping the most authoritative source.
+     *
+     * <p>Sources overlap by design — KRX covers every listed stock while Naver covers a
+     * watchlist — so running both makes the watchlist symbols arrive twice. {@code
+     * daily_stock_snapshot} is unique on {@code (symbol, trade_date)}, so passing duplicates on
+     * does not merely produce a messy report: the upsert violates the constraint and the whole
+     * run dies. Resolving it here keeps every downstream stage working on one row per stock.
+     *
+     * <p>Order of arrival is not used as the tiebreak, because it depends on Spring's bean
+     * ordering and would make the winner effectively arbitrary. Configured priority decides;
+     * arrival order only breaks ties between equally ranked sources, so a re-run agrees with
+     * the original.
+     */
+    private List<StockMetric> deduplicateBySymbol(List<StockMetric> metrics) {
+        Map<String, StockMetric> bySymbol = new LinkedHashMap<>();
+        for (StockMetric candidate : metrics) {
+            StockMetric existing = bySymbol.get(candidate.getSymbol());
+            if (existing == null) {
+                bySymbol.put(candidate.getSymbol(), candidate);
+                continue;
+            }
+            if (rank(candidate) < rank(existing)) {
+                log.warn("[processor] '{}' reported by both '{}' and '{}' — keeping '{}'",
+                        candidate.getSymbol(), existing.getSource(), candidate.getSource(),
+                        candidate.getSource());
+                bySymbol.put(candidate.getSymbol(), candidate);
+            } else {
+                log.warn("[processor] '{}' reported by both '{}' and '{}' — keeping '{}'",
+                        candidate.getSymbol(), existing.getSource(), candidate.getSource(),
+                        existing.getSource());
+            }
+        }
+        return new ArrayList<>(bySymbol.values());
+    }
+
+    /** Position in the configured priority list; unlisted sources sort after every listed one. */
+    private int rank(StockMetric metric) {
+        List<String> priority = properties.getCollector().getSourcePriority();
+        int index = metric.getSource() == null ? -1 : priority.indexOf(metric.getSource());
+        return index < 0 ? Integer.MAX_VALUE : index;
     }
 
     private StockMetric toMetric(RawData raw) {
