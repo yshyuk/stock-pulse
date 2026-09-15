@@ -239,6 +239,45 @@ pmset -g sched            # 예약 확인
   `api.anthropic.com`을 호출(모델 `claude-opus-4-8`, adaptive thinking)해 2차 분석을 수행합니다.
 - 분석 결과는 리포트에 `## 2차 분석 (Claude)` 섹션으로 덧붙여져 파일·DB·알림에 함께 반영됩니다.
 - 호출 실패는 배치를 중단시키지 않고(보강 단계) 로깅 후 건너뜁니다. 모델은 `STOCKPULSE_ANALYSIS_MODEL`로 변경 가능.
+- **과금 주의**: `api.anthropic.com`은 토큰당 과금이며 Claude Max 구독과 **별개로 청구**됩니다.
+  구독을 쓰려면 아래 (C)를 사용하세요.
+
+### (C) 자동 — Claude Code CLI (Max 구독 사용)
+배치와 **분리된 launchd 작업**이 06:10에 리포트를 읽어 `claude -p`로 해석하고 텔레그램으로 보냅니다.
+
+분리한 이유:
+1. **과금 경로** — `claude` CLI는 Max 구독을 쓰고, (B)의 Java SDK는 API 종량제입니다.
+2. **프롬프트 수정에 jar 재빌드가 불필요** — 2차 분석은 프롬프트를 계속 다듬게 됩니다.
+3. **실패 격리** — 분석이 죽어도 리포트는 이미 생성·발송된 뒤입니다.
+
+구성 파일:
+
+| 파일 | 역할 |
+|---|---|
+| `deploy/analyze-report.sh` | 리포트 → `claude -p` → 텔레그램 |
+| `deploy/analysis-prompt.md` | 프롬프트. 리포트 구조·스크리닝 룰·데이터 제약을 설명 |
+| `deploy/com.stockpulse.analyze.plist` | launchd 작업 (06:10) |
+
+설치:
+```bash
+cp deploy/com.stockpulse.analyze.plist ~/Library/LaunchAgents/
+# REPLACE_ME_USERNAME 3곳, TELEGRAM_* 2곳을 채운 뒤
+launchctl unload ~/Library/LaunchAgents/com.stockpulse.analyze.plist 2>/dev/null
+launchctl load   ~/Library/LaunchAgents/com.stockpulse.analyze.plist
+launchctl start  com.stockpulse.analyze          # 1회 수동 실행으로 확인
+tail -40 /Users/Shared/stock-pulse/logs/analyze-stdout.log
+```
+
+> `com.stockpulse.batch.plist`와 **파일명·Label이 달라** 기존 배치 작업을 덮어쓰지 않습니다.
+> 다만 텔레그램 토큰을 두 plist가 각각 갖게 되므로, 토큰을 재발급하면 **양쪽 모두** 고쳐야 합니다.
+
+주의할 점:
+- launchd는 로그인 셸이 아니라 PATH가 최소이고 키체인 접근이 제한될 수 있습니다.
+  `claude` 인증이 이 환경에서 되는지는 **반드시 1회 수동 실행으로 확인**하세요.
+- `claude`는 현재 작업 디렉터리를 읽을 수 있어야 시작합니다. 읽지 못하면
+  `An unknown error occurred`만 남기고 죽으므로, plist의 `WorkingDirectory`를 확인하세요.
+- 현재는 `--allowed-tools ""`로 도구 없이 텍스트만 분석합니다. 스냅샷 히스토리가 쌓인 뒤
+  `Read`·`Bash`를 열면 DB 이력까지 조회하는 분석으로 확장할 수 있습니다.
 
 ## 10. 기술 스택
 
