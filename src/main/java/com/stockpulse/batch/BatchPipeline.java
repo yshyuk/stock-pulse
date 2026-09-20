@@ -152,8 +152,12 @@ public class BatchPipeline {
             //     sample data once reached a production report unnoticed.
             switch (emptyRunPolicy.decide(runDate, metrics.size())) {
                 case SKIP -> {
-                    log.info("==== StockPulse batch SKIPPED: {} is a non-trading day and no prices "
-                            + "were collected (expected) ====", runDate);
+                    // Prices may well have been collected — the KRX source walks back to the
+                    // last real session — but a non-trading day has no report to make, and
+                    // storing another copy of that session under today's date would corrupt
+                    // the time series.
+                    log.info("==== StockPulse batch SKIPPED: {} is a non-trading day "
+                            + "({} price metric(s) discarded) ====", runDate, metrics.size());
                     return;
                 }
                 case FAIL -> throw new IllegalStateException(

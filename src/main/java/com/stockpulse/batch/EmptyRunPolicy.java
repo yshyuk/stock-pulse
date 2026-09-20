@@ -31,17 +31,22 @@ public class EmptyRunPolicy {
     public enum Decision {
         /** Data present — run normally. */
         PROCEED,
-        /** No data, and none was expected (weekend). Exit 0 without a report or notification. */
+        /** Non-trading day. Exit 0 without a report or notification, whatever was collected. */
         SKIP,
         /** No data on a trading day. Something is broken — fail loudly. */
         FAIL
     }
 
     public Decision decide(LocalDate runDate, int priceMetricCount) {
-        if (priceMetricCount > 0) {
-            return Decision.PROCEED;
+        // A weekend is skipped whatever arrives. The KRX source walks back to the last session
+        // with data, so a Saturday run DOES collect prices — Friday's. Storing them under
+        // Saturday's date creates a phantom row: Friday's close then appears three times
+        // (Sat, Sun, Mon), and derived metrics count ROWS rather than dates, so every 20-day
+        // figure silently shifts. There is no report to make on a day the market never opened.
+        if (isWeekend(runDate)) {
+            return Decision.SKIP;
         }
-        return isWeekend(runDate) ? Decision.SKIP : Decision.FAIL;
+        return priceMetricCount > 0 ? Decision.PROCEED : Decision.FAIL;
     }
 
     private boolean isWeekend(LocalDate date) {
