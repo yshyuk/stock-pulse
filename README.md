@@ -260,13 +260,27 @@ pmset -g sched            # 예약 확인
 
 설치:
 ```bash
+# 1) 스크립트를 ~/apps 로 내보낸다 (레포에서 직접 실행하면 안 됨 — 아래 주의 참조)
+mkdir -p ~/apps/stock-pulse
+cp deploy/analyze-report.sh deploy/analysis-prompt.md ~/apps/stock-pulse/
+chmod +x ~/apps/stock-pulse/analyze-report.sh
+
+# 2) plist 설치
 cp deploy/com.stockpulse.analyze.plist ~/Library/LaunchAgents/
 # REPLACE_ME_USERNAME 3곳, TELEGRAM_* 2곳을 채운 뒤
+grep -c REPLACE_ME ~/Library/LaunchAgents/com.stockpulse.analyze.plist   # 0 이어야 함
+
 launchctl unload ~/Library/LaunchAgents/com.stockpulse.analyze.plist 2>/dev/null
 launchctl load   ~/Library/LaunchAgents/com.stockpulse.analyze.plist
 launchctl start  com.stockpulse.analyze          # 1회 수동 실행으로 확인
 tail -40 /Users/Shared/stock-pulse/logs/analyze-stdout.log
 ```
+
+> **레포 경로에서 직접 실행하면 안 됩니다.** `~/Documents`는 macOS가 보호하는 폴더(TCC)라
+> launchd 에이전트가 읽지 못합니다. 파일 권한이 `-rwxr-xr-x`여도
+> `exit 126` + `Operation not permitted`로 죽습니다. 배치(jar)가 `~/apps`에서 도는 것과 같은
+> 이유이며, 레포를 옮기거나 `/bin/bash`에 전체 디스크 접근을 주는 것보다 산출물만 내보내는
+> 편이 안전합니다. **스크립트나 프롬프트를 고치면 `~/apps`로 다시 복사**해야 반영됩니다.
 
 > `com.stockpulse.batch.plist`와 **파일명·Label이 달라** 기존 배치 작업을 덮어쓰지 않습니다.
 > 다만 텔레그램 토큰을 두 plist가 각각 갖게 되므로, 토큰을 재발급하면 **양쪽 모두** 고쳐야 합니다.
