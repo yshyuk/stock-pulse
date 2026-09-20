@@ -31,10 +31,18 @@ class EmptyRunPolicyTest {
     }
 
     @Test
-    void anyPricesMeansProceedRegardlessOfTheDay() {
+    void anyPricesOnATradingDayMeansProceed() {
         assertThat(policy.decide(WEDNESDAY, 1)).isEqualTo(EmptyRunPolicy.Decision.PROCEED);
-        // A re-run for a past date can legitimately produce data on a weekend.
-        assertThat(policy.decide(SATURDAY, 1)).isEqualTo(EmptyRunPolicy.Decision.PROCEED);
+    }
+
+    @Test
+    void aWeekendIsSkippedEvenWhenPricesArrive() {
+        // The KRX source walks back to the last session with data, so a Saturday run DOES
+        // collect prices — Friday's. Storing them under Saturday's date creates a phantom row:
+        // Friday's close then appears three times (Sat, Sun, Mon), and derived metrics count
+        // rows rather than dates, so every 20-day figure silently shifts.
+        assertThat(policy.decide(SATURDAY, 2765)).isEqualTo(EmptyRunPolicy.Decision.SKIP);
+        assertThat(policy.decide(SUNDAY, 2765)).isEqualTo(EmptyRunPolicy.Decision.SKIP);
     }
 
     @Test
