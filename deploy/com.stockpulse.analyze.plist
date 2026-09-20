@@ -60,6 +60,12 @@
         <key>CLAUDE_BIN</key>
         <string>/Users/REPLACE_ME_USERNAME/.local/bin/claude</string>
 
+        <!-- `claude setup-token` 으로 발급한 장수명 토큰.
+             claude 의 OAuth 세션은 만료되며, 만료되면 아무 설명 없이 exit 1 로 죽는다.
+             ANTHROPIC_API_KEY 를 쓰면 안 된다 — 그쪽은 API 종량제라 구독을 쓰지 않는다. -->
+        <key>ANTHROPIC_AUTH_TOKEN</key>
+        <string>REPLACE_ME</string>
+
         <!-- 배치의 STOCKPULSE_REPORT_DIR 와 같아야 한다. -->
         <key>STOCKPULSE_REPORT_DIR</key>
         <string>/Users/Shared/stock-pulse/reports</string>
@@ -73,6 +79,11 @@
         <!-- claude 가 응답하지 않을 때 끊는 시간(초). -->
         <key>ANALYSIS_TIMEOUT_SEC</key>
         <string>600</string>
+
+        <!-- 배치가 끝날 때까지 기다릴 시간(초). 맥이 예약 시각에 자고 있으면 배치가
+             늦게 끝나므로, 고정 시각에 한 번 보고 포기하면 그날 분석이 빠진다. -->
+        <key>ANALYSIS_REPORT_WAIT_SEC</key>
+        <string>1800</string>
 
         <key>HOME</key>
         <string>/Users/REPLACE_ME_USERNAME</string>

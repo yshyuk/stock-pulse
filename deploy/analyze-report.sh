@@ -8,7 +8,11 @@
 #   2. 프롬프트를 jar 재빌드 없이 고칠 수 있다. 2차 분석은 프롬프트를 계속 다듬게 된다.
 #   3. 분석이 실패해도 리포트는 이미 생성·발송된 뒤다. 배치의 신뢰도를 깎지 않는다.
 #
-# 설치: README "2차 분석" 절 참조. launchd 로 배치보다 10분 뒤에 실행한다.
+# 인증: claude 의 OAuth 세션은 만료되며, 만료되면 아무 설명 없이 exit 1 로 죽는다.
+#       `claude setup-token` 으로 장수명 토큰을 발급해 ANTHROPIC_AUTH_TOKEN 으로 준다.
+#       ANTHROPIC_API_KEY 를 쓰면 안 된다 — 그쪽은 API 종량제라 구독을 쓰지 않는다.
+#
+# 설치: README "2차 분석" 절 참조. launchd 로 배치보다 뒤에 실행한다.
 
 set -uo pipefail
 
@@ -16,6 +20,9 @@ set -uo pipefail
 REPORT_DIR="${STOCKPULSE_REPORT_DIR:-/Users/Shared/stock-pulse/reports}"
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 TIMEOUT_SEC="${ANALYSIS_TIMEOUT_SEC:-600}"
+# 배치가 끝날 때까지 기다릴 시간. 맥이 예약 시각에 자고 있으면 배치가 늦게 끝나는데,
+# 분석이 고정 시각에 한 번만 보고 포기하면 그날 분석이 통째로 빠진다(실제로 겪음).
+REPORT_WAIT_SEC="${ANALYSIS_REPORT_WAIT_SEC:-1800}"
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
@@ -48,10 +55,32 @@ send_telegram() {
 }
 
 # ── 전제 조건 ───────────────────────────────────────────────────────────────
+is_weekend() {
+    local dow
+    dow="$(date -j -f "%Y-%m-%d" "$1" "+%u" 2>/dev/null || echo 0)"
+    [ "$dow" = "6" ] || [ "$dow" = "7" ]
+}
+
 if [ ! -f "$REPORT" ]; then
-    # 주말·공휴일에는 배치가 리포트를 만들지 않는다. 정상이므로 조용히 끝낸다.
-    log "[analyze] 리포트 없음: $REPORT — 비거래일로 보고 종료"
-    exit 0
+    if is_weekend "$RUN_DATE"; then
+        # 주말에는 배치도 리포트를 만들지 않는다. 기다릴 이유가 없다.
+        log "[analyze] 리포트 없음: $REPORT — 주말이므로 종료"
+        exit 0
+    fi
+    # 평일인데 없다면 배치가 아직 안 끝났을 수 있다. 고정 시각에 한 번 보고 포기하면
+    # 맥이 늦게 깨어난 날의 분석이 통째로 빠진다.
+    log "[analyze] 리포트 대기 중 (최대 ${REPORT_WAIT_SEC}s): $REPORT"
+    waited=0
+    while [ ! -f "$REPORT" ] && [ "$waited" -lt "$REPORT_WAIT_SEC" ]; do
+        sleep 30
+        waited=$((waited + 30))
+    done
+    if [ ! -f "$REPORT" ]; then
+        # 공휴일이거나 배치가 실패한 것. 배치 실패는 배치 쪽이 이미 알린다.
+        log "[analyze] ${REPORT_WAIT_SEC}s 대기 후에도 리포트 없음 — 공휴일이거나 배치 실패로 보고 종료"
+        exit 0
+    fi
+    log "[analyze] 리포트 확인됨 (${waited}s 대기)"
 fi
 
 if [ ! -x "$CLAUDE_BIN" ]; then
@@ -90,8 +119,14 @@ trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
 CLAUDE_PID=$!
 
 # macOS 기본 환경에는 timeout(1) 이 없어 워치독을 직접 둔다.
-( sleep "$TIMEOUT_SEC"; kill -0 "$CLAUDE_PID" 2>/dev/null && kill "$CLAUDE_PID" 2>/dev/null ) &
+# disown 은 노이즈 제거용이다 — 워치독을 kill 할 때 셸이 "Terminated: 15" 를 찍는데,
+# 정상 동작인데도 진짜 에러처럼 보여 로그 판독을 방해한다.
+# >/dev/null 2>&1 이 중요하다. 이게 없으면 워치독이 스크립트의 stdout 을 물고 있어
+# 본체가 끝나도 파이프가 닫히지 않는다 — 작업이 타임아웃 시간만큼(기본 10분) 매달린 것처럼 보인다.
+( sleep "$TIMEOUT_SEC"; kill -0 "$CLAUDE_PID" 2>/dev/null && kill "$CLAUDE_PID" 2>/dev/null ) \
+    >/dev/null 2>&1 &
 WATCHDOG_PID=$!
+disown "$WATCHDOG_PID" 2>/dev/null || true
 
 wait "$CLAUDE_PID"
 STATUS=$?
@@ -100,11 +135,31 @@ kill "$WATCHDOG_PID" 2>/dev/null
 ANALYSIS="$(cat "$OUT_FILE")"
 
 if [ "$STATUS" -ne 0 ] || [ -z "$ANALYSIS" ]; then
-    log "[analyze] 실패 (exit=$STATUS)"
-    log "$(head -c 500 "$ERR_FILE")"
+    # claude 는 인증 실패를 STDERR 가 아니라 STDOUT 으로 낸다. 예전에는 stderr 만 남겨서
+    # "OAuth session expired" 라는 결정적 단서를 로그에도 알림에도 남기지 못했다.
+    DETAIL="$(head -c 500 "$OUT_FILE")"
+    [ -z "$DETAIL" ] && DETAIL="$(head -c 500 "$ERR_FILE")"
+    [ -z "$DETAIL" ] && DETAIL="(출력 없음)"
+
+    HINT=""
+    case "$DETAIL" in
+        *authenticate*|*OAuth*|*Unauthorized*)
+            HINT="
+인증 문제로 보입니다. Mac Mini 에서 \`claude setup-token\` 으로 토큰을 재발급하고
+plist 의 ANTHROPIC_AUTH_TOKEN 을 갱신하세요."
+            ;;
+    esac
+
+    if [ "$STATUS" -eq 143 ]; then
+        HINT="
+${TIMEOUT_SEC}s 안에 끝나지 않아 중단했습니다. ANALYSIS_TIMEOUT_SEC 을 늘리거나
+claude 가 응답하고 있는지 확인하세요."
+    fi
+
+    log "[analyze] 실패 (exit=$STATUS): $DETAIL"
     send_telegram "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 exit=$STATUS
-$(head -c 500 "$ERR_FILE")"
+$DETAIL$HINT"
     exit 1
 fi
 
