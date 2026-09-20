@@ -8,12 +8,21 @@
     - 프롬프트를 jar 재빌드 없이 고칠 수 있다.
     - 분석이 실패해도 리포트는 이미 생성·발송된 뒤라 배치 신뢰도에 영향이 없다.
 
-  설치:
+  설치 (스크립트를 ~/apps 로 복사하는 단계가 필수):
+    mkdir -p ~/apps/stock-pulse
+    cp deploy/analyze-report.sh deploy/analysis-prompt.md ~/apps/stock-pulse/
+    chmod +x ~/apps/stock-pulse/analyze-report.sh
     cp deploy/com.stockpulse.analyze.plist ~/Library/LaunchAgents/
     # 아래 REPLACE_ME 를 채운 뒤
     launchctl unload ~/Library/LaunchAgents/com.stockpulse.analyze.plist 2>/dev/null
     launchctl load   ~/Library/LaunchAgents/com.stockpulse.analyze.plist
     launchctl start  com.stockpulse.analyze     # 1회 수동 실행해 확인
+
+  왜 레포가 아니라 ~/apps 에서 실행하는가:
+    ~/Documents 는 macOS 가 보호하는 폴더(TCC)라 launchd 에이전트가 읽지 못한다.
+    파일 권한이 -rwxr-xr-x 여도 exit 126 + "Operation not permitted" 로 죽는다.
+    배치(jar)가 ~/apps 에서 도는 것과 같은 이유이며, 레포를 옮기거나 /bin/bash 에
+    전체 디스크 접근을 주는 것보다 산출물만 내보내는 편이 안전하다.
 
   주의: launchd 는 로그인 셸이 아니라 PATH 가 최소다. claude 경로를 절대경로로 준다.
         키체인 접근이 막혀 인증이 실패할 수 있으므로 반드시 1회 수동 실행으로 확인할 것.
@@ -26,11 +35,12 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/REPLACE_ME_USERNAME/Documents/Repository/stock-pulse/deploy/analyze-report.sh</string>
+        <string>/Users/REPLACE_ME_USERNAME/apps/stock-pulse/analyze-report.sh</string>
     </array>
 
+    <!-- claude 는 cwd 를 읽을 수 있어야 시작한다. ~/Documents 는 TCC 로 막히므로 ~/apps 를 쓴다. -->
     <key>WorkingDirectory</key>
-    <string>/Users/REPLACE_ME_USERNAME/Documents/Repository/stock-pulse</string>
+    <string>/Users/REPLACE_ME_USERNAME/apps/stock-pulse</string>
 
     <!-- 배치(06:00)가 끝난 뒤. 전종목 수집이 약 20초이므로 10분이면 충분하다. -->
     <key>StartCalendarInterval</key>
@@ -50,6 +60,12 @@
         <key>CLAUDE_BIN</key>
         <string>/Users/REPLACE_ME_USERNAME/.local/bin/claude</string>
 
+        <!-- `claude setup-token` 으로 발급한 장수명 토큰.
+             claude 의 OAuth 세션은 만료되며, 만료되면 아무 설명 없이 exit 1 로 죽는다.
+             ANTHROPIC_API_KEY 를 쓰면 안 된다 — 그쪽은 API 종량제라 구독을 쓰지 않는다. -->
+        <key>ANTHROPIC_AUTH_TOKEN</key>
+        <string>REPLACE_ME</string>
+
         <!-- 배치의 STOCKPULSE_REPORT_DIR 와 같아야 한다. -->
         <key>STOCKPULSE_REPORT_DIR</key>
         <string>/Users/Shared/stock-pulse/reports</string>
@@ -63,6 +79,11 @@
         <!-- claude 가 응답하지 않을 때 끊는 시간(초). -->
         <key>ANALYSIS_TIMEOUT_SEC</key>
         <string>600</string>
+
+        <!-- 배치가 끝날 때까지 기다릴 시간(초). 맥이 예약 시각에 자고 있으면 배치가
+             늦게 끝나므로, 고정 시각에 한 번 보고 포기하면 그날 분석이 빠진다. -->
+        <key>ANALYSIS_REPORT_WAIT_SEC</key>
+        <string>1800</string>
 
         <key>HOME</key>
         <string>/Users/REPLACE_ME_USERNAME</string>
