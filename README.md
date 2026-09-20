@@ -265,9 +265,12 @@ mkdir -p ~/apps/stock-pulse
 cp deploy/analyze-report.sh deploy/analysis-prompt.md ~/apps/stock-pulse/
 chmod +x ~/apps/stock-pulse/analyze-report.sh
 
-# 2) plist 설치
+# 2) 인증 토큰 발급 (구독 사용)
+claude setup-token          # 출력된 sk-ant-oat01-... 을 plist 에 넣는다
+
+# 3) plist 설치
 cp deploy/com.stockpulse.analyze.plist ~/Library/LaunchAgents/
-# REPLACE_ME_USERNAME 3곳, TELEGRAM_* 2곳을 채운 뒤
+# REPLACE_ME_USERNAME 3곳, TELEGRAM_* 2곳, ANTHROPIC_AUTH_TOKEN 을 채운 뒤
 grep -c REPLACE_ME ~/Library/LaunchAgents/com.stockpulse.analyze.plist   # 0 이어야 함
 
 launchctl unload ~/Library/LaunchAgents/com.stockpulse.analyze.plist 2>/dev/null
@@ -275,6 +278,16 @@ launchctl load   ~/Library/LaunchAgents/com.stockpulse.analyze.plist
 launchctl start  com.stockpulse.analyze          # 1회 수동 실행으로 확인
 tail -40 /Users/Shared/stock-pulse/logs/analyze-stdout.log
 ```
+
+> **인증은 `ANTHROPIC_AUTH_TOKEN`으로 줍니다.** `claude`의 OAuth 세션은 만료되며,
+> 만료되면 `Failed to authenticate: OAuth session expired`를 **stdout으로** 내고 exit 1 로
+> 죽습니다. `claude setup-token`이 발급하는 장수명 토큰을 쓰세요.
+> `ANTHROPIC_API_KEY`를 쓰면 **안 됩니다** — 그쪽은 API 종량제라 구독을 쓰지 않습니다.
+> 상태는 `claude auth status`로 확인합니다.
+
+> **리포트가 늦게 생겨도 기다립니다.** 맥이 06:00에 자고 있으면 배치가 늦게 끝나는데
+> (실측 06:00~06:31), 분석이 고정 시각에 한 번 보고 포기하면 그날 분석이 통째로 빠집니다.
+> 평일에는 최대 `ANALYSIS_REPORT_WAIT_SEC`(기본 30분)까지 기다리고, 주말에는 즉시 종료합니다.
 
 > **레포 경로에서 직접 실행하면 안 됩니다.** `~/Documents`는 macOS가 보호하는 폴더(TCC)라
 > launchd 에이전트가 읽지 못합니다. 파일 권한이 `-rwxr-xr-x`여도
