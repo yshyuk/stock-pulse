@@ -181,12 +181,17 @@ ls build/test-results/test/TEST-*.xml | wc -l
 
 ## 현재 상태 (2026-09-21)
 
-- **v0.3.4** 릴리즈됨. 배치·분석 모두 Mac Mini에서 동작 확인
-- 테스트 163개 통과
+- **v0.4.0** 릴리즈·배포 완료. 맥미니에서 실행 확인:
+  `2762 evaluated -> 546 matched -> 50 kept (cap 50)` + 텔레그램·디스코드 발송
+- 테스트 163개 통과 (클래스 40개)
 - DB에 09-14 ~ 09-18 스냅샷 (주말 유령 행 삭제 완료)
 
-### 진행 중
-- **PR #21** — 텔레그램 HTML 서식 + 디스코드 전송 (CI 대기/머지 전)
+배포 전 맥미니는 **v0.3.3** 이었다. v0.3.4 가 릴리즈됐는데도 반영되지 않고 있었다.
+러너가 0대라 배포가 수동이고, **배포를 빠뜨려도 조용히 구버전이 돈다.**
+
+### 검증 대기
+- 2차 분석의 **HTML 서식·디스코드 전송**은 아직 실제 확인이 안 됐다.
+  `launchctl start com.stockpulse.analyze` 로 돌려봐야 한다
 
 ### 배포 호스트는 맥미니 하나다
 
@@ -237,11 +242,24 @@ KRX_ALL_ENABLED=true KRX_API_KEY=... STOCKPULSE_SCREENING_ENABLED=true \
 tail -40 /Users/Shared/stock-pulse/logs/stdout.log
 tail -40 /Users/Shared/stock-pulse/logs/analyze-stdout.log
 
-# 수동 실행
+# 수동 실행 — 반드시 launchctl 로. 셸에서 직접 돌리면 안 된다(아래 참조)
 launchctl start com.stockpulse.batch
 launchctl start com.stockpulse.analyze
-bash ~/apps/stock-pulse/analyze-report.sh 2026-09-18
 ```
+
+### 수동 실행은 `launchctl start` 로 한다
+
+시크릿은 plist 의 `EnvironmentVariables` 에만 있다. 그래서 스크립트를 셸에서 직접 부르면
+**인증도 알림도 통째로 빠진다.**
+
+```bash
+bash ~/apps/stock-pulse/analyze-report.sh 2026-09-21
+#  → Failed to authenticate: OAuth session expired    (ANTHROPIC_AUTH_TOKEN 없음)
+#  → [analyze] 텔레그램 미설정 — 전송 생략              (TELEGRAM_BOT_TOKEN 없음)
+```
+
+둘 다 **환경 문제이지 배포 문제가 아니다.** 실제로 이 출력을 보고 토큰이 또 만료됐다고
+오진할 뻔했다. 날짜를 지정해 다시 돌려야 한다면 plist 의 값을 그 셸에 먼저 넣어야 한다.
 
 시크릿(KRX 인증키, 텔레그램 토큰, `ANTHROPIC_AUTH_TOKEN`)은 plist에만 있다.
 코드·설정·문서 어디에도 넣지 않는다.
