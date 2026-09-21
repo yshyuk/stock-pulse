@@ -164,8 +164,13 @@ public class StockPulseProperties {
         /** When false the stage passes every stock through unchanged (current watchlist behaviour). */
         private boolean enabled = false;
 
-        /** Hard cap on how many stocks reach the report. Bounds the daily Claude bill. */
-        private int maxCandidates = 30;
+        /**
+         * Hard cap on how many stocks reach the report. Was 30 while the second-stage analysis
+         * ran on the metered API; it now runs through the Max subscription, so the cap exists to
+         * keep the report readable rather than to bound a bill. 30 was cutting off the ±5~15%
+         * band entirely on a 474-match day.
+         */
+        private int maxCandidates = 50;
 
         /**
          * Minimum trading value (price x volume, KRW) to be screened at all. Without this floor,
