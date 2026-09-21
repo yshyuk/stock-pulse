@@ -168,6 +168,17 @@ feat|fix|chore/* → (dev PR) → develop → (release PR) → release + v{x.y.z
 - `release`가 프로덕션 트렁크이자 GitHub 기본 브랜치. **직접 push 금지**
 - `main`은 폐지됐다. 워크플로가 `main`을 참조하던 탓에 배포가 영영 트리거되지 않은 적이 있다
 - CI(`ci.yml`)는 `release`·`develop` 대상 PR에서 돈다
+- **릴리즈 PR(develop→release)은 merge commit으로 머지한다. squash 금지.**
+  squash 하면 release가 develop의 커밋들을 커밋 하나로 받아 공통 조상이 어긋나고,
+  **다음 릴리즈 PR이 통째로 충돌**한다. v0.4.0을 squash로 머지한 탓에 v0.5.0 PR에서
+  4개 파일이 전부 충돌했다. (작업 브랜치→develop PR은 squash가 맞다)
+
+  이미 갈라졌다면 release를 develop으로 되머지해 조상 관계만 잇는다. develop이
+  내용상 상위 집합인지 **먼저 확인**하고, 트리가 바뀌지 않는지 검증한다:
+  ```bash
+  git diff develop origin/release        # release 에만 있는 내용이 없어야 한다
+  git merge -s ours origin/release       # develop 트리는 그대로, 조상 관계만 연결
+  ```
 - `pull_request` 이벤트의 트리거 판정은 **base 브랜치**의 워크플로 정의를 쓴다.
   `ci.yml` 수정이 아직 base에 없으면 그 PR에는 CI가 돌지 않는다
 
