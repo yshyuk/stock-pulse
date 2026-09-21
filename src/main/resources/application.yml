@@ -42,8 +42,10 @@ stockpulse:
   # 기본 off — 워치리스트 운영 중에는 전 종목이 그대로 통과한다.
   screening:
     enabled: ${STOCKPULSE_SCREENING_ENABLED:false}
-    # 리포트에 실릴 최대 종목 수. 하루 Claude 비용의 상한을 결정한다.
-    max-candidates: ${STOCKPULSE_SCREENING_MAX:30}
+    # 리포트에 실릴 최대 종목 수. 30이던 시절엔 2차 분석이 API 종량제라 비용 상한이었는데,
+    # Max 구독으로 옮겨가며 그 제약이 사라졌다. 지금은 리포트 가독성 상한이다.
+    # 474종목이 매칭된 날 30개로 자르니 ±5~15% 구간이 통째로 안 보였다.
+    max-candidates: ${STOCKPULSE_SCREENING_MAX:50}
     # 거래대금(현재가 x 거래량) 하한. 이게 없으면 평소 거래가 거의 없는 종목이
     # 거래량 배수 룰에 쉽게 걸려 목록을 잠식한다.
     min-trading-value: ${STOCKPULSE_SCREENING_MIN_VALUE:1000000000}
