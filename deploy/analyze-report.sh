@@ -1,6 +1,10 @@
 #!/bin/bash
 #
-# 2차 분석: 오늘 리포트를 Claude Code CLI 로 해석해 텔레그램으로 보낸다.
+# 2차 분석: 오늘 리포트를 Claude Code CLI 로 해석해 텔레그램·디스코드로 보낸다.
+#
+# 결과는 .md 파일로 보낸다(1차 리포트와 같은 방식). 본문으로 보내면 텔레그램 4096자 /
+# 디스코드 2000자 제한에 걸려 한 편의 글이 토막나고, 조각낼 때 태그 경계까지 신경 써야 한다.
+# 실패 알림만 본문으로 보낸다 — 짧고, 첨부를 열게 만들면 안 된다.
 #
 # 왜 배치(jar)에 넣지 않고 분리했는가
 #   1. 과금 경로가 다르다. jar 안의 AnthropicReportAnalyzer 는 api.anthropic.com 을
@@ -30,6 +34,8 @@ REPORT_WAIT_SEC="${ANALYSIS_REPORT_WAIT_SEC:-1800}"
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+# 테스트에서 로컬 서버로 돌려받기 위한 것. 운영에서는 건드리지 않는다.
+TELEGRAM_API_BASE="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${ANALYSIS_PROMPT_FILE:-$SCRIPT_DIR/analysis-prompt.md}"
@@ -76,11 +82,15 @@ send_telegram() {
 
     _tg_post() {
         [ -z "$1" ] && return 0
-        /usr/bin/curl -s --max-time 30 -X POST \
-            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+        local resp
+        resp="$(/usr/bin/curl -s --max-time 30 -X POST \
+            "${TELEGRAM_API_BASE}/bot${BOT_TOKEN}/sendMessage" \
             -d "chat_id=${CHAT_ID}" -d "parse_mode=HTML" \
-            --data-urlencode "text=$1" >/dev/null \
-            || log "[analyze] 텔레그램 전송 실패"
+            --data-urlencode "text=$1")"
+        case "$resp" in
+            *'"ok":true'*) ;;
+            *) log "[analyze] 텔레그램 전송 실패: $(printf '%.200s' "$resp")" ;;
+        esac
     }
 
     while IFS= read -r line; do
@@ -98,6 +108,10 @@ send_telegram() {
 send_discord() {
     local text="$1"
     if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+        # 조용히 건너뛰지 않는다. 실제로 plist 에 DISCORD_WEBHOOK_URL 을 넣지 않은 채
+        # "디스코드에 분석만 안 온다" 는 증상으로 한참을 헤맸다. 배치는 보내는데
+        # 분석만 안 오면 코드를 의심하게 되는데, 원인은 환경변수 누락이었다.
+        log "[analyze] 디스코드 미설정(DISCORD_WEBHOOK_URL) — 전송 생략"
         return 0
     fi
     local chunk="" line
@@ -119,10 +133,66 @@ send_discord() {
     _dc_post "$chunk"
 }
 
+# ── 파일 전송 ───────────────────────────────────────────────────────────────
+#
+# 분석 결과는 본문이 아니라 .md 파일로 보낸다. 배치의 1차 리포트와 같은 방식이다.
+#
+# 왜 본문이 아닌가
+#   - 텔레그램 4096자 / 디스코드 2000자 제한 때문에 긴 분석이 여러 조각으로 쪼개진다.
+#     읽는 쪽에서는 한 편의 글이 토막나 보인다.
+#   - 조각내려면 HTML 태그 경계를 신경 써야 하고, 그 변환 자체가 깨질 여지를 만든다.
+#   - 파일로 보내면 마크다운이 원문 그대로 남는다. 표도 살아 있고 나중에 다시 열어보기 쉽다.
+#
+# 실패 알림은 여전히 본문으로 보낸다 — 짧고, 즉시 보여야 하고, 첨부를 열게 만들면 안 된다.
+send_telegram_file() {
+    local path="$1" caption="$2" resp
+    if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+        log "[analyze] 텔레그램 미설정 — 파일 전송 생략"
+        return 1
+    fi
+    # 응답 본문을 본다. curl 은 HTTP 400 에도 exit 0 이라, 종료코드만 보면 텔레그램이
+    # 거절한 것을 성공으로 기록하게 된다.
+    resp="$(/usr/bin/curl -s --max-time 60 -X POST \
+        "${TELEGRAM_API_BASE}/bot${BOT_TOKEN}/sendDocument" \
+        -F "chat_id=${CHAT_ID}" \
+        -F "caption=${caption}" \
+        -F "document=@${path};type=text/markdown")"
+    case "$resp" in
+        *'"ok":true'*) log "[analyze] 텔레그램 전송: $(basename "$path")" ;;
+        *) log "[analyze] 텔레그램 파일 전송 실패: $(printf '%.200s' "$resp")"; return 1 ;;
+    esac
+}
+
+send_discord_file() {
+    local path="$1" content="$2" code
+    if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+        log "[analyze] 디스코드 미설정(DISCORD_WEBHOOK_URL) — 파일 전송 생략"
+        return 1
+    fi
+    # 필드명은 배치의 DiscordNotifier 와 맞춘다(files[0]).
+    code="$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 60 \
+        -F "content=${content}" \
+        -F "files[0]=@${path};type=text/markdown" \
+        "$DISCORD_WEBHOOK_URL")"
+    case "$code" in
+        2*) log "[analyze] 디스코드 전송: $(basename "$path")" ;;
+        *) log "[analyze] 디스코드 파일 전송 실패 (HTTP $code)"; return 1 ;;
+    esac
+}
+
 # 설정된 모든 채널로 보낸다. 한쪽이 실패해도 다른 쪽은 시도한다.
 notify() {
     send_telegram "$1"
     send_discord "$1"
+}
+
+# 어느 한 채널이라도 성공하면 0. 전부 실패하면 1 — 분석을 만들어놓고 아무에게도
+# 전달하지 못한 것을 성공으로 기록하면, 그날 분석이 사라진 사실을 아무도 모른다.
+notify_file() {
+    local path="$1" caption="$2" ok=1
+    send_telegram_file "$path" "$caption" && ok=0
+    send_discord_file "$path" "$caption" && ok=0
+    return $ok
 }
 
 # ── 전제 조건 ───────────────────────────────────────────────────────────────
@@ -253,8 +323,9 @@ ANALYSIS_FILE="$REPORT_DIR/$RUN_DATE.analysis.md"
 } > "$ANALYSIS_FILE"
 log "[analyze] 저장: $ANALYSIS_FILE"
 
-notify "🔍 StockPulse 2차 분석 ($RUN_DATE)
-
-$ANALYSIS"
+if ! notify_file "$ANALYSIS_FILE" "🔍 StockPulse 2차 분석 — $RUN_DATE"; then
+    log "[analyze] 전 채널 전송 실패 — 분석은 $ANALYSIS_FILE 에 남아 있습니다"
+    exit 1
+fi
 
 log "[analyze] 종료"

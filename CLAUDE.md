@@ -130,9 +130,30 @@ git checkout release && git pull origin release
 
 `--model` / `--fallback-model`을 명시한다(거절은 모델별 분류기).
 
-### 텔레그램 전송
-`parse_mode=HTML`을 쓴다. MarkdownV2는 이스케이프할 문자가 많아 한 글자만 놓쳐도 400이 난다.
-HTML은 `& < >` 셋만 막으면 된다. **분할은 줄 경계에서만** — 태그 중간을 자르면 깨진 HTML이 된다.
+### 전송 방식 — 분석은 `.md` 파일로 보낸다
+
+1차 리포트와 같다. 본문으로 보내면 텔레그램 4096자 / 디스코드 2000자에 걸려 한 편의 글이
+토막나고, 조각낼 때 HTML 태그 경계까지 맞춰야 한다. 파일로 보내면 마크다운이 원문 그대로
+남고 표도 살아 있다.
+
+**실패 알림만 본문으로 보낸다.** 짧고, 즉시 보여야 하고, 첨부를 열게 만들면 안 된다.
+그쪽은 `parse_mode=HTML`을 쓴다 — MarkdownV2는 이스케이프할 문자가 많아 한 글자만 놓쳐도
+400이 나고, HTML은 `& < >` 셋만 막으면 된다. **분할은 줄 경계에서만** 한다.
+
+### 전송 성공을 종료코드로 판단하지 않는다
+
+`curl -s`는 **HTTP 400에도 exit 0**이다. 종료코드만 보면 텔레그램이 거절한 것을 성공으로
+기록한다. 응답을 본다 — 텔레그램은 `"ok":true`, 디스코드는 HTTP 2xx.
+
+분석을 만들어놓고 **아무 채널에도 못 보냈으면 exit 1**이다. 한쪽만 성공하면 0.
+전달되지 않은 분석을 성공으로 기록하면 그날 분석이 사라진 사실을 아무도 모른다.
+
+### 채널 누락은 조용히 넘어가지 않는다
+
+`DISCORD_WEBHOOK_URL`이 비어 있으면 로그를 남기고 건너뛴다. 실제로 "배치 리포트는 오는데
+분석만 디스코드에 안 온다"는 증상으로 헤맸는데, 원인은 **analyze plist에 키를 안 넣은 것**
+이었다. `install.sh`는 plist를 덮어쓰지 않으므로 레포 템플릿에 키를 추가해도 **운영 plist에는
+자동으로 반영되지 않는다.**
 
 ---
 
@@ -147,6 +168,17 @@ feat|fix|chore/* → (dev PR) → develop → (release PR) → release + v{x.y.z
 - `release`가 프로덕션 트렁크이자 GitHub 기본 브랜치. **직접 push 금지**
 - `main`은 폐지됐다. 워크플로가 `main`을 참조하던 탓에 배포가 영영 트리거되지 않은 적이 있다
 - CI(`ci.yml`)는 `release`·`develop` 대상 PR에서 돈다
+- **릴리즈 PR(develop→release)은 merge commit으로 머지한다. squash 금지.**
+  squash 하면 release가 develop의 커밋들을 커밋 하나로 받아 공통 조상이 어긋나고,
+  **다음 릴리즈 PR이 통째로 충돌**한다. v0.4.0을 squash로 머지한 탓에 v0.5.0 PR에서
+  4개 파일이 전부 충돌했다. (작업 브랜치→develop PR은 squash가 맞다)
+
+  이미 갈라졌다면 release를 develop으로 되머지해 조상 관계만 잇는다. develop이
+  내용상 상위 집합인지 **먼저 확인**하고, 트리가 바뀌지 않는지 검증한다:
+  ```bash
+  git diff develop origin/release        # release 에만 있는 내용이 없어야 한다
+  git merge -s ours origin/release       # develop 트리는 그대로, 조상 관계만 연결
+  ```
 - `pull_request` 이벤트의 트리거 판정은 **base 브랜치**의 워크플로 정의를 쓴다.
   `ci.yml` 수정이 아직 base에 없으면 그 PR에는 CI가 돌지 않는다
 
@@ -181,12 +213,17 @@ ls build/test-results/test/TEST-*.xml | wc -l
 
 ## 현재 상태 (2026-09-21)
 
-- **v0.3.4** 릴리즈됨. 배치·분석 모두 Mac Mini에서 동작 확인
-- 테스트 163개 통과
+- **v0.4.0** 릴리즈·배포 완료. 맥미니에서 실행 확인:
+  `2762 evaluated -> 546 matched -> 50 kept (cap 50)` + 텔레그램·디스코드 발송
+- 테스트 163개 통과 (클래스 40개)
 - DB에 09-14 ~ 09-18 스냅샷 (주말 유령 행 삭제 완료)
 
-### 진행 중
-- **PR #21** — 텔레그램 HTML 서식 + 디스코드 전송 (CI 대기/머지 전)
+배포 전 맥미니는 **v0.3.3** 이었다. v0.3.4 가 릴리즈됐는데도 반영되지 않고 있었다.
+러너가 0대라 배포가 수동이고, **배포를 빠뜨려도 조용히 구버전이 돈다.**
+
+### 검증 대기
+- 2차 분석의 **HTML 서식·디스코드 전송**은 아직 실제 확인이 안 됐다.
+  `launchctl start com.stockpulse.analyze` 로 돌려봐야 한다
 
 ### 배포 호스트는 맥미니 하나다
 
@@ -237,11 +274,24 @@ KRX_ALL_ENABLED=true KRX_API_KEY=... STOCKPULSE_SCREENING_ENABLED=true \
 tail -40 /Users/Shared/stock-pulse/logs/stdout.log
 tail -40 /Users/Shared/stock-pulse/logs/analyze-stdout.log
 
-# 수동 실행
+# 수동 실행 — 반드시 launchctl 로. 셸에서 직접 돌리면 안 된다(아래 참조)
 launchctl start com.stockpulse.batch
 launchctl start com.stockpulse.analyze
-bash ~/apps/stock-pulse/analyze-report.sh 2026-09-18
 ```
+
+### 수동 실행은 `launchctl start` 로 한다
+
+시크릿은 plist 의 `EnvironmentVariables` 에만 있다. 그래서 스크립트를 셸에서 직접 부르면
+**인증도 알림도 통째로 빠진다.**
+
+```bash
+bash ~/apps/stock-pulse/analyze-report.sh 2026-09-21
+#  → Failed to authenticate: OAuth session expired    (ANTHROPIC_AUTH_TOKEN 없음)
+#  → [analyze] 텔레그램 미설정 — 전송 생략              (TELEGRAM_BOT_TOKEN 없음)
+```
+
+둘 다 **환경 문제이지 배포 문제가 아니다.** 실제로 이 출력을 보고 토큰이 또 만료됐다고
+오진할 뻔했다. 날짜를 지정해 다시 돌려야 한다면 plist 의 값을 그 셸에 먼저 넣어야 한다.
 
 시크릿(KRX 인증키, 텔레그램 토큰, `ANTHROPIC_AUTH_TOKEN`)은 plist에만 있다.
 코드·설정·문서 어디에도 넣지 않는다.
