@@ -223,6 +223,23 @@ pmset -g sched            # 예약 확인
 
 배치형이라 **데몬 재시작이 필요 없습니다** — 다음 새벽 실행 때 새 jar가 자동으로 쓰입니다.
 
+### 8.6 수동 배포 — `./deploy/install.sh`
+self-hosted 러너가 없거나 즉시 반영해야 할 때 씁니다.
+
+```bash
+cd ~/Documents/Repository/stock-pulse
+git checkout release && git pull origin release
+./deploy/install.sh              # 빌드 + jar·스크립트·프롬프트를 ~/apps 로
+./deploy/install.sh --no-build   # 이미 빌드했다면 배포만
+```
+
+배포 대상이 **jar 하나가 아니라 jar + `analyze-report.sh` + `analysis-prompt.md` 셋**입니다.
+수동 복사 시절 스크립트만 구버전으로 남아 하루치 분석이 통째로 빠진 적이 있습니다 —
+빠뜨려도 조용히 구버전이 돌기 때문에 알아채기 어렵습니다. 이 스크립트는 복사 후
+내용이 실제로 일치하는지까지 확인하고, 커밋되지 않은 변경이 있으면 경고합니다.
+
+plist는 시크릿이 들어 있어 건드리지 않습니다. 최초 설치는 8.4·9절을 따릅니다.
+
 ## 9. 2차 Claude 분석
 
 두 가지 방식이 있습니다.
@@ -260,10 +277,8 @@ pmset -g sched            # 예약 확인
 
 설치:
 ```bash
-# 1) 스크립트를 ~/apps 로 내보낸다 (레포에서 직접 실행하면 안 됨 — 아래 주의 참조)
-mkdir -p ~/apps/stock-pulse
-cp deploy/analyze-report.sh deploy/analysis-prompt.md ~/apps/stock-pulse/
-chmod +x ~/apps/stock-pulse/analyze-report.sh
+# 1) 빌드 + 배포 (jar·스크립트·프롬프트를 ~/apps 로 내보낸다)
+./deploy/install.sh
 
 # 2) 인증 토큰 발급 (구독 사용)
 claude setup-token          # 출력된 sk-ant-oat01-... 을 plist 에 넣는다

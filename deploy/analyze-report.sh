@@ -20,6 +20,10 @@ set -uo pipefail
 REPORT_DIR="${STOCKPULSE_REPORT_DIR:-/Users/Shared/stock-pulse/reports}"
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 TIMEOUT_SEC="${ANALYSIS_TIMEOUT_SEC:-600}"
+# 모델을 명시한다. 안전 분류기가 확률적으로 요청을 거절하는 경우가 있어
+# (refusal, 예: reasoning_extraction) 폴백 모델을 함께 지정한다.
+MODEL="${ANALYSIS_MODEL:-sonnet}"
+FALLBACK_MODEL="${ANALYSIS_FALLBACK_MODEL:-opus}"
 # 배치가 끝날 때까지 기다릴 시간. 맥이 예약 시각에 자고 있으면 배치가 늦게 끝나는데,
 # 분석이 고정 시각에 한 번만 보고 포기하면 그날 분석이 통째로 빠진다(실제로 겪음).
 REPORT_WAIT_SEC="${ANALYSIS_REPORT_WAIT_SEC:-1800}"
@@ -115,6 +119,7 @@ trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
 # --allowed-tools "" : 도구 없이 순수 텍스트 분석만. 예측 가능하고 빠르다.
 #   DB 이력까지 보게 하려면 여기에 Read·Bash 를 열면 된다(히스토리가 쌓인 뒤).
 "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --allowed-tools "" \
+    --model "$MODEL" --fallback-model "$FALLBACK_MODEL" \
     < "$REPORT" > "$OUT_FILE" 2> "$ERR_FILE" &
 CLAUDE_PID=$!
 
@@ -143,6 +148,11 @@ if [ "$STATUS" -ne 0 ] || [ -z "$ANALYSIS" ]; then
 
     HINT=""
     case "$DETAIL" in
+        *safeguards*|*reasoning_extraction*)
+            HINT="
+안전 분류기가 요청을 거절했습니다(확률적으로 발생합니다). ANALYSIS_MODEL 을 다른 모델로
+바꾸거나, deploy/analysis-prompt.md 의 표현을 다듬어 보세요."
+            ;;
         *authenticate*|*OAuth*|*Unauthorized*)
             HINT="
 인증 문제로 보입니다. Mac Mini 에서 \`claude setup-token\` 으로 토큰을 재발급하고
