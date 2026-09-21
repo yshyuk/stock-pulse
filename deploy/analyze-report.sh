@@ -29,6 +29,7 @@ FALLBACK_MODEL="${ANALYSIS_FALLBACK_MODEL:-opus}"
 REPORT_WAIT_SEC="${ANALYSIS_REPORT_WAIT_SEC:-1800}"
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${ANALYSIS_PROMPT_FILE:-$SCRIPT_DIR/analysis-prompt.md}"
@@ -38,24 +39,90 @@ REPORT="$REPORT_DIR/$RUN_DATE.md"
 
 log() { echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $*"; }
 
-# 텔레그램은 메시지당 4096자 제한이 있다. parse_mode 없이 평문으로 잘라 보낸다 —
-# 마크다운을 중간에서 자르면 태그가 깨져 API 가 400 을 돌려주기 때문이다.
+# 마크다운을 텔레그램 HTML 로 바꾼다.
+#
+# 왜 MarkdownV2 가 아니라 HTML 인가: MarkdownV2 는 _*[]()~`>#+-=|{}.! 를 전부 이스케이프해야
+# 해서 한 글자만 놓쳐도 400 이 난다. HTML 은 & < > 셋만 막으면 되고, 텔레그램이 표나 ## 헤더를
+# 지원하지 않으므로 어차피 변환이 필요하다.
+to_telegram_html() {
+    python3 - "$1" <<'PYEOF'
+import html, re, sys
+
+text = sys.argv[1]
+out = []
+for line in text.split("\n"):
+    # 표 구분선(|---|---|)은 텔레그램에서 의미가 없다.
+    if re.fullmatch(r"\s*\|[\s|:-]+\|\s*", line):
+        continue
+    line = html.escape(line, quote=False)
+    line = re.sub(r"^\s*#{1,6}\s*(.+)$", r"<b>\1</b>", line)      # ## 헤더 → 굵게
+    line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)           # **굵게**
+    line = re.sub(r"`([^`]+)`", r"<code>\1</code>", line)         # `코드`
+    out.append(line)
+print("\n".join(out))
+PYEOF
+}
+
+# 텔레그램은 메시지당 4096자 제한이 있다. 줄 경계에서만 자른다 — 태그 한가운데를 자르면
+# 나머지 조각이 깨진 HTML 이 되어 400 이 난다.
 send_telegram() {
     local text="$1"
     if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
         log "[analyze] 텔레그램 미설정 — 전송 생략"
         return 0
     fi
-    local chunk
-    while [ -n "$text" ]; do
-        chunk="${text:0:3800}"
-        text="${text:3800}"
+    local html chunk="" line
+    html="$(to_telegram_html "$text")"
+
+    _tg_post() {
+        [ -z "$1" ] && return 0
         /usr/bin/curl -s --max-time 30 -X POST \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=${chunk}" >/dev/null \
+            -d "chat_id=${CHAT_ID}" -d "parse_mode=HTML" \
+            --data-urlencode "text=$1" >/dev/null \
             || log "[analyze] 텔레그램 전송 실패"
-    done
+    }
+
+    while IFS= read -r line; do
+        if [ ${#chunk} -gt 0 ] && [ $(( ${#chunk} + ${#line} + 1 )) -gt 3800 ]; then
+            _tg_post "$chunk"
+            chunk="$line"
+        else
+            chunk="${chunk:+$chunk$'\n'}$line"
+        fi
+    done <<< "$html"
+    _tg_post "$chunk"
+}
+
+# 디스코드는 마크다운을 그대로 받으므로 변환이 필요 없다. 제한은 2000자.
+send_discord() {
+    local text="$1"
+    if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+        return 0
+    fi
+    local chunk="" line
+    _dc_post() {
+        [ -z "$1" ] && return 0
+        /usr/bin/curl -s --max-time 30 -H "Content-Type: application/json" \
+            -d "$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1]}))' "$1")" \
+            "$DISCORD_WEBHOOK_URL" >/dev/null \
+            || log "[analyze] 디스코드 전송 실패"
+    }
+    while IFS= read -r line; do
+        if [ ${#chunk} -gt 0 ] && [ $(( ${#chunk} + ${#line} + 1 )) -gt 1900 ]; then
+            _dc_post "$chunk"
+            chunk="$line"
+        else
+            chunk="${chunk:+$chunk$'\n'}$line"
+        fi
+    done <<< "$text"
+    _dc_post "$chunk"
+}
+
+# 설정된 모든 채널로 보낸다. 한쪽이 실패해도 다른 쪽은 시도한다.
+notify() {
+    send_telegram "$1"
+    send_discord "$1"
 }
 
 # ── 전제 조건 ───────────────────────────────────────────────────────────────
@@ -89,7 +156,7 @@ fi
 
 if [ ! -x "$CLAUDE_BIN" ]; then
     log "[analyze] claude CLI 를 찾을 수 없음: $CLAUDE_BIN"
-    send_telegram "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
+    notify "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 claude CLI 를 찾을 수 없습니다: $CLAUDE_BIN
 CLAUDE_BIN 환경변수를 확인하세요."
     exit 1
@@ -104,7 +171,7 @@ fi
 # "An unknown error occurred" 만 남기고 죽어 원인 파악이 어렵다 — 먼저 확인한다.
 if ! ls . >/dev/null 2>&1; then
     log "[analyze] 현재 디렉터리를 읽을 수 없음: $(pwd) — plist 의 WorkingDirectory 를 확인하세요"
-    send_telegram "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
+    notify "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 작업 디렉터리를 읽을 수 없습니다: $(pwd)"
     exit 1
 fi
@@ -167,7 +234,7 @@ claude 가 응답하고 있는지 확인하세요."
     fi
 
     log "[analyze] 실패 (exit=$STATUS): $DETAIL"
-    send_telegram "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
+    notify "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 exit=$STATUS
 $DETAIL$HINT"
     exit 1
@@ -186,7 +253,7 @@ ANALYSIS_FILE="$REPORT_DIR/$RUN_DATE.analysis.md"
 } > "$ANALYSIS_FILE"
 log "[analyze] 저장: $ANALYSIS_FILE"
 
-send_telegram "🔍 StockPulse 2차 분석 ($RUN_DATE)
+notify "🔍 StockPulse 2차 분석 ($RUN_DATE)
 
 $ANALYSIS"
 
