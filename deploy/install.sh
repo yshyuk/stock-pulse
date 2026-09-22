@@ -32,7 +32,8 @@ cd "$REPO_DIR" || fail "레포 디렉터리로 이동할 수 없습니다: $REPO
 say "레포: $REPO_DIR"
 say "브랜치: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
 say "커밋: $(git log --oneline -1 2>/dev/null || echo '?')"
-say "버전: $(grep '^version' build.gradle.kts 2>/dev/null || echo '?')"
+REPO_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' build.gradle.kts 2>/dev/null | head -1)"
+say "레포 버전: ${REPO_VERSION:-?}"
 
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     say "주의: 커밋되지 않은 변경이 있습니다. 배포되는 내용과 레포 상태가 다를 수 있습니다."
@@ -46,6 +47,19 @@ fi
 
 JAR="build/libs/stock-pulse.jar"
 [ -f "$JAR" ] || fail "jar 이 없습니다: $JAR (--no-build 를 썼다면 먼저 빌드하세요)"
+
+# --no-build 는 마지막에 빌드된 jar 을 그대로 내보낸다. 그 jar 이 지금 레포 버전으로
+# 빌드된 것이라는 보장이 없다. 실제로 v0.5.0 을 --no-build 로 배포했더니 v0.4.0 때
+# 빌드한 jar 이 나갔고, "버전: 0.5.0" 이라고 출력한 뒤 실행 로그에는 v0.4.0 이 찍혔다.
+# 셸 스크립트만 바뀐 릴리즈여서 동작은 같았지만, 다음 사람이 배포 실패로 오해한다.
+JAR_VERSION="$(unzip -p "$JAR" META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' \
+    | sed -n 's/^Implementation-Version: *//p' | head -1)"
+say "jar 버전: ${JAR_VERSION:-?}"
+if [ -n "$REPO_VERSION" ] && [ -n "$JAR_VERSION" ] && [ "$REPO_VERSION" != "$JAR_VERSION" ]; then
+    say "주의: 내보낼 jar 은 v${JAR_VERSION} 으로 빌드된 것입니다 (레포는 v${REPO_VERSION})."
+    say "      실행 로그에 v${JAR_VERSION} 이 찍힙니다 — 배포가 안 된 것으로 오해하기 쉽습니다."
+    say "      Java 코드가 바뀐 릴리즈라면 --no-build 없이 다시 실행하세요."
+fi
 
 mkdir -p "$APPS_DIR" || fail "$APPS_DIR 을 만들 수 없습니다"
 
