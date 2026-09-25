@@ -5,6 +5,31 @@
 
 ---
 
+## [0.5.3] - 2026-09-26
+
+### 버그 수정
+- **`deploy.yml` 이 jar 만 배포하던 것**: `install.sh` 보다 먼저 만들어져
+  `cp build/libs/stock-pulse.jar` 로 jar 하나만 복사하고 있었다. self-hosted 러너를 붙이면
+  `analyze-report.sh` 와 `analysis-prompt.md` 가 **영구히 구버전으로 남는다** — 자동화가
+  수동 배포보다 나빠지는 셈이다. 실제로 스크립트만 구버전으로 남아 하루치 분석이 통째로
+  빠진 적이 있고, 빠뜨려도 조용히 구버전이 돈다.
+
+  `./deploy/install.sh` 를 호출한다. 셋을 다 내보내고 복사 후 `cmp` 로 레포와 일치하는지
+  확인한다. 빌드도 그 안에 있으므로 별도 `gradlew` 단계를 없앴다.
+
+### 문서
+- **self-hosted 러너 등록 절차와 PUBLIC 레포 규칙**. GitHub 은 self-hosted 러너를 private
+  레포에만 쓰라고 권고한다 — 포크 PR 이 러너에서 돌면 맥미니에서 임의 코드가 실행되고,
+  그 기계에는 KRX 인증키·텔레그램 토큰·`ANTHROPIC_AUTH_TOKEN` 이 다 있다.
+
+  현재 노출은 없다(`ci.yml` 은 `ubuntu-latest`, `deploy.yml` 은 포크로 트리거 불가,
+  `pull_request` 가 쓰는 워크플로 정의는 base 브랜치 것). 위험은 스스로 `self-hosted` 를
+  `pull_request` job 에 붙일 때만 생기므로 **그 금지 규칙을 못박았다.**
+
+  등록 절차는 아키텍처를 판별하고 자산 URL 을 릴리즈 API 에서 받는다(구성하지 않는다).
+
+---
+
 ## [0.5.2] - 2026-09-26
 
 ### 버그 수정
