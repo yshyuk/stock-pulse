@@ -74,8 +74,56 @@ git checkout release && git pull origin release
 하루치 분석이 빠진 적이 있다. **빠뜨려도 조용히 구버전이 돈다.**
 
 ### self-hosted 러너
-**등록되어 있지 않다(0대).** `deploy.yml`이 트리거돼도 job이 queue에 머물다 24시간 후
-취소된다. 그래서 jar는 수동 빌드·배포한다. 러너를 등록하면 자동화된다.
+
+`deploy.yml`(`push: release`, `workflow_dispatch`)이 맥미니의 self-hosted 러너에서
+`./deploy/install.sh` 를 돌린다. 러너가 없으면 job이 queue에 머물다 24시간 후 취소되고,
+그동안 배포는 수동이다.
+
+**`deploy.yml`은 `install.sh`를 호출해야 한다.** 예전에는 `cp build/libs/stock-pulse.jar` 로
+jar만 복사했다. 그러면 `analyze-report.sh`·`analysis-prompt.md`가 영구히 구버전으로 남는다 —
+자동화가 수동 배포보다 나빠지는 셈이다. 배포 대상은 셋이고, 빠뜨려도 조용히 구버전이 돈다.
+
+#### 이 레포는 PUBLIC 이다 — 지켜야 할 규칙
+
+GitHub은 self-hosted 러너를 **private 레포에만** 쓰라고 권고한다. 포크한 누구든 PR을 열 수
+있고, 그 PR이 self-hosted 러너에서 돌면 맥미니에서 임의 코드가 실행된다. 이 기계에는 KRX
+인증키·텔레그램 토큰·`ANTHROPIC_AUTH_TOKEN`이 다 있다.
+
+**`pull_request`로 트리거되는 job을 `self-hosted`에 올리지 않는다.** 예외 없다.
+
+```
+ci.yml      pull_request        → ubuntu-latest   ← 포크 PR 은 여기서만 돈다
+deploy.yml  push:release, 수동  → self-hosted     ← 포크로 트리거할 수 없다
+```
+
+`pull_request` 이벤트가 쓰는 워크플로 정의는 **base 브랜치 것**이므로 포크가 바꿔 넣을 수는
+없다. 위험은 우리가 스스로 `self-hosted`를 `pull_request` job에 붙이는 경우에만 생긴다.
+`pull_request_target`·`issue_comment` 같은 트리거를 새로 도입할 때도 같은 규칙을 적용한다.
+
+#### 등록 절차 (맥미니에서)
+
+등록 토큰은 1시간 만료다. **채팅·문서에 붙여넣지 않는다** — 그 자리에서 생성해 바로 쓴다.
+
+```bash
+# 아키텍처를 직접 고르지 말고 판별한다. 자산 URL 도 API 에서 받아 쓴다(구성하지 않는다).
+case "$(uname -m)" in arm64) A=osx-arm64 ;; x86_64) A=osx-x64 ;; *) echo "지원 안 함"; exit 1 ;; esac
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -fsSL -o runner.tar.gz "$(gh api repos/actions/runner/releases/latest \
+  --jq ".assets[] | select(.name | test(\"$A\")) | .browser_download_url")"
+tar xzf runner.tar.gz
+
+TOKEN="$(gh api -X POST repos/yshyuk/stock-pulse/actions/runners/registration-token --jq .token)"
+./config.sh --url https://github.com/yshyuk/stock-pulse --token "$TOKEN" \
+  --name macmini --labels self-hosted,macos --work _work --unattended
+
+./svc.sh install && ./svc.sh start && ./svc.sh status
+```
+
+`gh` 가 없거나 로그인되어 있지 않으면 토큰은 웹에서 받는다 —
+Settings → Actions → Runners → New self-hosted runner 화면에 표시된다.
+
+`~/actions-runner/_work` 는 `~/Documents` 밖이라 TCC 문제가 없다. 서비스는 사용자
+LaunchAgent(`actions.runner.*.plist`)로 등록되므로 `~/apps` 쓰기도 된다.
 
 ### plist는 코드가 건드리지 않는다
 시크릿이 들어 있어 `install.sh`도 배포 워크플로도 덮어쓰지 않는다. 변경은 수동.
