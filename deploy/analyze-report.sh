@@ -75,9 +75,9 @@ send_telegram() {
     local text="$1"
     if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
         log "[analyze] 텔레그램 미설정 — 전송 생략"
-        return 0
+        return 1
     fi
-    local html chunk="" line
+    local html chunk="" line failed=0
     html="$(to_telegram_html "$text")"
 
     _tg_post() {
@@ -89,7 +89,7 @@ send_telegram() {
             --data-urlencode "text=$1")"
         case "$resp" in
             *'"ok":true'*) ;;
-            *) log "[analyze] 텔레그램 전송 실패: $(printf '%.200s' "$resp")" ;;
+            *) log "[analyze] 텔레그램 전송 실패: $(printf '%.200s' "$resp")"; failed=1 ;;
         esac
     }
 
@@ -102,6 +102,7 @@ send_telegram() {
         fi
     done <<< "$html"
     _tg_post "$chunk"
+    return $failed
 }
 
 # 디스코드는 마크다운을 그대로 받으므로 변환이 필요 없다. 제한은 2000자.
@@ -112,15 +113,20 @@ send_discord() {
         # "디스코드에 분석만 안 온다" 는 증상으로 한참을 헤맸다. 배치는 보내는데
         # 분석만 안 오면 코드를 의심하게 되는데, 원인은 환경변수 누락이었다.
         log "[analyze] 디스코드 미설정(DISCORD_WEBHOOK_URL) — 전송 생략"
-        return 0
+        return 1
     fi
-    local chunk="" line
+    local chunk="" line failed=0
     _dc_post() {
         [ -z "$1" ] && return 0
-        /usr/bin/curl -s --max-time 30 -H "Content-Type: application/json" \
+        local code
+        code="$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "Content-Type: application/json" \
             -d "$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1]}))' "$1")" \
-            "$DISCORD_WEBHOOK_URL" >/dev/null \
-            || log "[analyze] 디스코드 전송 실패"
+            "$DISCORD_WEBHOOK_URL")"
+        case "$code" in
+            2*) ;;
+            *) log "[analyze] 디스코드 전송 실패 (HTTP $code)"; failed=1 ;;
+        esac
     }
     while IFS= read -r line; do
         if [ ${#chunk} -gt 0 ] && [ $(( ${#chunk} + ${#line} + 1 )) -gt 1900 ]; then
@@ -131,6 +137,7 @@ send_discord() {
         fi
     done <<< "$text"
     _dc_post "$chunk"
+    return $failed
 }
 
 # ── 파일 전송 ───────────────────────────────────────────────────────────────
@@ -181,9 +188,19 @@ send_discord_file() {
 }
 
 # 설정된 모든 채널로 보낸다. 한쪽이 실패해도 다른 쪽은 시도한다.
+#
+# 어디로 갔는지 반드시 남긴다. 2026-09-25 분석이 타임아웃으로 실패했을 때 로그가
+# "실패 (exit=143)" 에서 끝나 있어, 실패 알림이 실제로 전달됐는지 로그만으로는
+# 알 수 없었다. 알림이 갔는지 모르는 상태는 알림이 없는 것과 다르지 않다.
 notify() {
-    send_telegram "$1"
-    send_discord "$1"
+    local sent=""
+    send_telegram "$1" && sent="${sent}텔레그램 "
+    send_discord "$1" && sent="${sent}디스코드 "
+    if [ -n "$sent" ]; then
+        log "[analyze] 실패 알림 전송: ${sent% }"
+    else
+        log "[analyze] 실패 알림을 어느 채널로도 보내지 못했습니다"
+    fi
 }
 
 # 어느 한 채널이라도 성공하면 0. 전부 실패하면 1 — 분석을 만들어놓고 아무에게도
@@ -247,68 +264,101 @@ if ! ls . >/dev/null 2>&1; then
 fi
 
 # ── 분석 ────────────────────────────────────────────────────────────────────
-log "[analyze] $REPORT 분석 시작 (timeout ${TIMEOUT_SEC}s)"
-
 OUT_FILE="$(mktemp)"
 ERR_FILE="$(mktemp)"
 trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
 
+# 한 번 호출한다. 종료코드를 돌려주고 출력은 OUT_FILE·ERR_FILE 에 남긴다.
+#
 # --allowed-tools "" : 도구 없이 순수 텍스트 분석만. 예측 가능하고 빠르다.
 #   DB 이력까지 보게 하려면 여기에 Read·Bash 를 열면 된다(히스토리가 쌓인 뒤).
-"$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --allowed-tools "" \
-    --model "$MODEL" --fallback-model "$FALLBACK_MODEL" \
-    < "$REPORT" > "$OUT_FILE" 2> "$ERR_FILE" &
-CLAUDE_PID=$!
+run_claude() {
+    : > "$OUT_FILE"
+    : > "$ERR_FILE"
+    "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --allowed-tools "" \
+        --model "$MODEL" --fallback-model "$FALLBACK_MODEL" \
+        < "$REPORT" > "$OUT_FILE" 2> "$ERR_FILE" &
+    local pid=$! wd st
 
-# macOS 기본 환경에는 timeout(1) 이 없어 워치독을 직접 둔다.
-# disown 은 노이즈 제거용이다 — 워치독을 kill 할 때 셸이 "Terminated: 15" 를 찍는데,
-# 정상 동작인데도 진짜 에러처럼 보여 로그 판독을 방해한다.
-# >/dev/null 2>&1 이 중요하다. 이게 없으면 워치독이 스크립트의 stdout 을 물고 있어
-# 본체가 끝나도 파이프가 닫히지 않는다 — 작업이 타임아웃 시간만큼(기본 10분) 매달린 것처럼 보인다.
-( sleep "$TIMEOUT_SEC"; kill -0 "$CLAUDE_PID" 2>/dev/null && kill "$CLAUDE_PID" 2>/dev/null ) \
-    >/dev/null 2>&1 &
-WATCHDOG_PID=$!
-disown "$WATCHDOG_PID" 2>/dev/null || true
+    # macOS 기본 환경에는 timeout(1) 이 없어 워치독을 직접 둔다.
+    # disown 은 노이즈 제거용이다 — 워치독을 kill 할 때 셸이 "Terminated: 15" 를 찍는데,
+    # 정상 동작인데도 진짜 에러처럼 보여 로그 판독을 방해한다.
+    # >/dev/null 2>&1 이 중요하다. 이게 없으면 워치독이 스크립트의 stdout 을 물고 있어
+    # 본체가 끝나도 파이프가 닫히지 않는다 — 작업이 타임아웃 시간만큼 매달린 것처럼 보인다.
+    ( sleep "$TIMEOUT_SEC"; kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null ) \
+        >/dev/null 2>&1 &
+    wd=$!
+    disown "$wd" 2>/dev/null || true
 
-wait "$CLAUDE_PID"
-STATUS=$?
-kill "$WATCHDOG_PID" 2>/dev/null
+    wait "$pid"
+    st=$?
+    kill "$wd" 2>/dev/null
+    return $st
+}
 
-ANALYSIS="$(cat "$OUT_FILE")"
+# 실패하면 한 번 더 시도한다.
+#
+# 왜: 2026-09-25 에 exit=143(타임아웃) + 출력 전무로 그날 분석이 통째로 빠졌다. 성공한
+# 날들은 38~67초에 끝났으니 느린 게 아니라 멈춘 것이고, 타임아웃을 늘려도 해결되지 않는다.
+# 안전 분류기 거절도 확률적으로 발생한다. 두 경우 모두 **두 번째 시도가 정확히 듣는** 형태다.
+# 리포트는 이미 생성·발송된 뒤라 재시도에 드는 비용도 없다.
+ATTEMPTS="${ANALYSIS_ATTEMPTS:-2}"
+RETRY_WAIT_SEC="${ANALYSIS_RETRY_WAIT_SEC:-15}"
+attempt=1
+while : ; do
+    log "[analyze] $REPORT 분석 시작 — 시도 ${attempt}/${ATTEMPTS} (timeout ${TIMEOUT_SEC}s)"
+    run_claude
+    STATUS=$?
+    ANALYSIS="$(cat "$OUT_FILE")"
 
-if [ "$STATUS" -ne 0 ] || [ -z "$ANALYSIS" ]; then
+    if [ "$STATUS" -eq 0 ] && [ -n "$ANALYSIS" ]; then
+        break
+    fi
+
     # claude 는 인증 실패를 STDERR 가 아니라 STDOUT 으로 낸다. 예전에는 stderr 만 남겨서
     # "OAuth session expired" 라는 결정적 단서를 로그에도 알림에도 남기지 못했다.
     DETAIL="$(head -c 500 "$OUT_FILE")"
     [ -z "$DETAIL" ] && DETAIL="$(head -c 500 "$ERR_FILE")"
     [ -z "$DETAIL" ] && DETAIL="(출력 없음)"
+    log "[analyze] 시도 ${attempt} 실패 (exit=$STATUS): $DETAIL"
 
-    HINT=""
+    if [ "$attempt" -ge "$ATTEMPTS" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep "$RETRY_WAIT_SEC"
+done
+
+if [ "$STATUS" -ne 0 ] || [ -z "$ANALYSIS" ]; then
+    HINT="
+${ATTEMPTS}회 모두 실패했습니다."
     case "$DETAIL" in
         *safeguards*|*reasoning_extraction*)
-            HINT="
+            HINT="$HINT
 안전 분류기가 요청을 거절했습니다(확률적으로 발생합니다). ANALYSIS_MODEL 을 다른 모델로
 바꾸거나, deploy/analysis-prompt.md 의 표현을 다듬어 보세요."
             ;;
         *authenticate*|*OAuth*|*Unauthorized*)
-            HINT="
+            HINT="$HINT
 인증 문제로 보입니다. Mac Mini 에서 \`claude setup-token\` 으로 토큰을 재발급하고
 plist 의 ANTHROPIC_AUTH_TOKEN 을 갱신하세요."
             ;;
     esac
 
     if [ "$STATUS" -eq 143 ]; then
-        HINT="
-${TIMEOUT_SEC}s 안에 끝나지 않아 중단했습니다. ANALYSIS_TIMEOUT_SEC 을 늘리거나
-claude 가 응답하고 있는지 확인하세요."
+        HINT="$HINT
+${TIMEOUT_SEC}s 안에 끝나지 않아 중단했습니다. 출력이 전혀 없는 타임아웃은 느린 것이
+아니라 멈춘 것입니다 — ANALYSIS_TIMEOUT_SEC 을 늘리기 전에 claude 가 응답하는지 보세요."
     fi
 
-    log "[analyze] 실패 (exit=$STATUS): $DETAIL"
+    log "[analyze] 실패 (exit=$STATUS, ${ATTEMPTS}회 시도): $DETAIL"
     notify "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 exit=$STATUS
 $DETAIL$HINT"
     exit 1
 fi
+
+[ "$attempt" -gt 1 ] && log "[analyze] ${attempt}번째 시도에서 성공"
 
 log "[analyze] 완료 — ${#ANALYSIS}자"
 
