@@ -26,20 +26,14 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Build (includes tests)
+      # install.sh 를 쓴다. 손으로 jar 만 복사하면 analyze-report.sh 와 analysis-prompt.md 가
+      # 영구히 구버전으로 남는다 — 배포 대상은 jar 하나가 아니라 셋이다. 실제로 스크립트만
+      # 구버전으로 남아 하루치 분석이 통째로 빠진 적이 있고, 빠뜨려도 조용히 구버전이 돈다.
+      # install.sh 는 셋을 다 내보내고 복사 후 cmp 로 레포와 일치하는지 확인한다.
+      - name: Build and deploy (jar + analyze-report.sh + analysis-prompt.md)
         run: |
-          chmod +x ./gradlew
-          ./gradlew clean build
-
-      - name: Deploy jar to ~/apps/stock-pulse
-        run: |
-          set -euo pipefail
-          APP_DIR="$HOME/apps/stock-pulse"
-          mkdir -p "$APP_DIR"
-          # Build produces build/libs/stock-pulse.jar (fixed name via bootJar config).
-          cp build/libs/stock-pulse.jar "$APP_DIR/stock-pulse.jar"
-          echo "Deployed jar:"
-          ls -la "$APP_DIR/stock-pulse.jar"
+          chmod +x ./gradlew ./deploy/install.sh
+          ./deploy/install.sh
 
       - name: Sync launchd plist if changed
         run: |
