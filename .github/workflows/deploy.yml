@@ -13,15 +13,12 @@ jobs:
   build-and-deploy:
     runs-on: self-hosted
 
-    env:
-      PLIST_NAME: com.stockpulse.batch.plist
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -35,18 +32,77 @@ jobs:
           chmod +x ./gradlew ./deploy/install.sh
           ./deploy/install.sh
 
-      - name: Sync launchd plist if changed
+      # 설치된 plist 에는 시크릿과 이 기계의 절대경로가 들어 있어 덮어쓰지 않는다. 그래서
+      # 템플릿과 "다른지" 가 아니라 **키가 빠졌는지**를 본다.
+      #
+      # 왜 전문 비교를 버렸나: 템플릿은 REPLACE_ME 자리표시자를 쓰므로 diff 는 **항상** 다르다.
+      # 매 배포마다 경고가 뜨면 그 경고는 배경 소음이 되고, 진짜 신호를 놓친다. 실제로
+      # analyze plist 에 DISCORD_WEBHOOK_URL 이 빠져 분석이 디스코드로 안 갔는데, 이 검사는
+      # batch plist 만 보고 있어서 그 사실을 알려주지도 못했다.
+      #
+      # 키 이름만 비교하므로 자리표시자·시크릿·경로 차이는 신경 쓰지 않는다.
+      - name: Check installed plists for missing keys
         run: |
-          set -euo pipefail
-          DEST="$HOME/Library/LaunchAgents/$PLIST_NAME"
-          SRC="deploy/$PLIST_NAME"
-          # The installed plist holds machine-specific secrets/paths, so we DON'T blindly
-          # overwrite it. We only warn if the committed template changed, so the operator can
-          # re-apply edits intentionally. (First-time install is a manual step — see README.)
-          if [ ! -f "$DEST" ]; then
-            echo "::warning::$DEST not found. Install it once manually (see README 'launchd 설정')."
-          elif ! diff -q "$SRC" "$DEST" >/dev/null 2>&1; then
-            echo "::warning::Committed plist template differs from the installed one. Review deploy/$PLIST_NAME, re-apply machine-specific values, then: launchctl unload \"$DEST\"; launchctl load \"$DEST\""
-          else
-            echo "Installed plist matches the template."
-          fi
+          set -uo pipefail
+
+          # 최상위 키와 EnvironmentVariables 키 이름을 정렬해 출력한다.
+          #
+          # plutil 로 한 번 거쳐 읽는다. 직접 읽으면 주석 때문에 깨질 수 있다 — XML 주석에는
+          # "-" 두 개를 연달아 쓸 수 없는데 plutil·launchd 는 받아주므로 그런 파일이 실제로
+          # 커밋되어 있었다. plutil 은 재직렬화하면서 주석을 떨어내므로 그 함정이 사라진다.
+          #
+          # 파싱이 실패하면 반드시 죽는다. 조용히 빈 목록을 돌려주면 양쪽이 빈 집합으로
+          # 비교되어 "키 누락 없음" 이 찍힌다 — 거짓 통과다. 실제로 이 검사를 만들면서
+          # 그 함정에 먼저 빠졌다.
+          keys() {
+            plutil -convert xml1 -o - "$1" | python3 -c '
+          import plistlib, sys
+          d = plistlib.loads(sys.stdin.buffer.read())
+          for k in sorted(d):
+              print(k)
+          for k in sorted(d.get("EnvironmentVariables", {})):
+              print("EnvironmentVariables." + k)
+          '
+          }
+
+          problems=0
+          for name in com.stockpulse.batch.plist com.stockpulse.analyze.plist; do
+            SRC="deploy/$name"
+            DEST="$HOME/Library/LaunchAgents/$name"
+
+            if [ ! -f "$DEST" ]; then
+              echo "::warning::$name 이 설치되어 있지 않습니다 ($DEST). README 'launchd 설정' 참조."
+              problems=1
+              continue
+            fi
+
+            # 키 목록을 먼저 변수에 담고 각각 성공했는지 본다. <(keys ...) 안에서 죽으면
+            # 그 실패가 바깥 명령의 종료코드에 반영되지 않아 또 조용히 통과한다.
+            if ! src_keys="$(keys "$SRC")" || [ -z "$src_keys" ]; then
+              echo "::error::$SRC 를 읽지 못했습니다. 키 검사를 신뢰할 수 없습니다."
+              exit 1
+            fi
+            if ! dest_keys="$(keys "$DEST")" || [ -z "$dest_keys" ]; then
+              echo "::error::$DEST 를 읽지 못했습니다. 키 검사를 신뢰할 수 없습니다."
+              exit 1
+            fi
+
+            missing="$(comm -23 <(printf '%s\n' "$src_keys") <(printf '%s\n' "$dest_keys") | tr '\n' ' ')"
+            extra="$(comm -13 <(printf '%s\n' "$src_keys") <(printf '%s\n' "$dest_keys") | tr '\n' ' ')"
+
+            if [ -n "${missing// /}" ]; then
+              # 진짜 신호다. 템플릿에 키가 추가됐는데 설치된 plist 에는 없다는 뜻이고,
+              # 그 키가 필요한 기능은 조용히 동작하지 않는다.
+              echo "::warning::$name: 설치된 plist 에 없는 키 — $missing (deploy/$name 을 보고 값을 채운 뒤 launchctl unload/load)"
+              problems=1
+            else
+              echo "$name: 키 누락 없음"
+            fi
+            if [ -n "${extra// /}" ]; then
+              # 이쪽은 보통 정상이다(이 기계에서만 쓰는 값). 알리되 경고로 올리지 않는다.
+              echo "$name: 템플릿에 없는 키 — $extra"
+            fi
+          done
+
+          # 경고는 남기되 배포를 실패시키지는 않는다. jar 은 이미 나갔고, plist 는 수동 영역이다.
+          echo "plist 키 검사 완료 (problems=$problems)"
