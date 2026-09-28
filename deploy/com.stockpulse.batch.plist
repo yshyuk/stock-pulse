@@ -22,7 +22,9 @@
     <key>Label</key>
     <string>com.stockpulse.batch</string>
 
-    <!-- java -jar <app>/stock-pulse.jar --spring.profiles.active=prod -->
+    <!-- java -jar {app}/stock-pulse.jar 에 prod 프로파일 인자를 붙여 실행한다.
+         XML 주석 안에는 "-" 두 개를 연달아 쓸 수 없다. plutil 과 launchd 는 받아주지만
+         엄격한 XML 파서는 거절해서, 이 파일을 읽는 검사 스크립트가 조용히 실패한다. -->
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/java</string>
