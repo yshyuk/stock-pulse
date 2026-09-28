@@ -213,6 +213,52 @@ notify_file() {
 }
 
 # ── 전제 조건 ───────────────────────────────────────────────────────────────
+
+# 주입된 경로 환경변수의 위생을 먼저 본다.
+#
+# 왜: analyze plist 의 HOME 이 "/Users/yshyuk " 였다 — 끝에 공백 한 칸. launchd 는 그 값을
+# 그대로 넘기고, claude 는 $HOME/.claude 에 설정·인증 상태를 두므로 엉뚱한 디렉터리를 보게
+# 된다. 이런 값은 "파일이 없다" 처럼 드러나지 않고 **출력 한 글자 없는 멈춤**으로 나타나서,
+# 이틀치 분석을 잃고 나서야 cat 오류 메시지의 경로에 낀 공백을 보고 알아챘다.
+#
+# 공백을 조용히 잘라내지 않는다. 잘라내면 잘못된 plist 가 그대로 남아 다음 사람이 또 겪는다.
+check_env_path() {
+    local var="$1" val="${!1:-}" trimmed
+    [ -z "$val" ] && return 0
+    trimmed="${val#"${val%%[![:space:]]*}"}"     # 앞쪽 공백 제거
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"  # 뒤쪽 공백 제거
+    if [ "$val" != "$trimmed" ]; then
+        log "[analyze] $var 앞뒤에 공백이 있습니다: '$val'"
+        return 1
+    fi
+    return 0
+}
+
+env_problem=""
+home_clean=true
+for v in HOME CLAUDE_BIN STOCKPULSE_REPORT_DIR ANALYSIS_PROMPT_FILE; do
+    if ! check_env_path "$v"; then
+        env_problem="${env_problem}${v} "
+        [ "$v" = HOME ] && home_clean=false
+    fi
+done
+# 공백 문제로 이미 잡힌 HOME 을 두 번 세지 않는다.
+if $home_clean && [ -n "$HOME" ] && [ ! -d "$HOME" ]; then
+    log "[analyze] HOME 이 실재하는 디렉터리가 아닙니다: '$HOME'"
+    env_problem="${env_problem}HOME "
+fi
+if [ -n "$env_problem" ]; then
+    log "[analyze] 환경변수가 잘못되어 중단합니다 — plist 의 EnvironmentVariables 를 고치세요"
+    notify "⚠️ StockPulse 2차 분석 중단 ($RUN_DATE)
+
+환경변수 값이 잘못되었습니다: ${env_problem% }
+
+plist 의 EnvironmentVariables 에 앞뒤 공백이 섞였거나 경로가 실재하지 않습니다.
+이대로 두면 claude 가 출력 없이 멈춥니다(실제로 그렇게 이틀치 분석을 잃었습니다).
+확인: plutil -p ~/Library/LaunchAgents/com.stockpulse.analyze.plist"
+    exit 1
+fi
+
 is_weekend() {
     local dow
     dow="$(date -j -f "%Y-%m-%d" "$1" "+%u" 2>/dev/null || echo 0)"
