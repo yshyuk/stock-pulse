@@ -211,6 +211,31 @@ LaunchAgent(`actions.runner.*.plist`)로 등록되므로 `~/apps` 쓰기도 된�
 분석을 만들어놓고 **아무 채널에도 못 보냈으면 exit 1**이다. 한쪽만 성공하면 0.
 전달되지 않은 분석을 성공으로 기록하면 그날 분석이 사라진 사실을 아무도 모른다.
 
+### plist 값의 앞뒤 공백을 의심한다
+
+analyze plist의 `HOME`이 `'/Users/yshyuk '` 였다 — **끝에 공백 한 칸.** launchd는 그 값을
+그대로 넘기고, `claude`는 `$HOME/.claude`에 설정·인증 상태를 두므로 엉뚱한 디렉터리를 본다.
+증상은 파일 없음이 아니라 **출력 한 글자 없는 멈춤**(`exit=143`)이었고, 이틀치 분석을 잃었다.
+batch plist에는 `HOME`이 없어 배치는 멀쩡했다.
+
+찾은 경로: 수동 진단 중 `cat: /Users/yshyuk /apps/...` 오류 메시지의 경로에 낀 공백.
+**zsh 프롬프트가 `~`에서 절대경로로 바뀐 것도 같은 신호였다** — PWD가 HOME으로 시작하지
+않게 되니까.
+
+이제 `analyze-report.sh`가 시작 시점에 `HOME`·`CLAUDE_BIN`·`STOCKPULSE_REPORT_DIR`·
+`ANALYSIS_PROMPT_FILE`의 앞뒤 공백과 `HOME`의 실존을 확인하고, 문제가 있으면 **즉시 실패하며
+알린다.** 공백을 조용히 잘라내지 않는다 — 잘라내면 잘못된 plist가 그대로 남아 다음에 또 겪는다.
+
+plist 값을 눈으로 볼 때는 `repr()`로 찍는다. `plutil -p`는 공백을 보여주지 않는다.
+
+```bash
+plutil -convert xml1 -o - ~/Library/LaunchAgents/com.stockpulse.analyze.plist | python3 -c '
+import plistlib,sys
+d=plistlib.loads(sys.stdin.buffer.read())
+for k,v in sorted(d.get("EnvironmentVariables",{}).items()):
+    s=str(v); print(k, repr(s), "앞뒤공백!" if s!=s.strip() else "")'
+```
+
 ### 실패하면 한 번 더 시도한다
 
 `ANALYSIS_ATTEMPTS`(기본 2). 2026-09-25 에 `exit=143`(타임아웃) + **출력 전무**로 그날
