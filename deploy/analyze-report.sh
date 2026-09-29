@@ -319,10 +319,11 @@ trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
 # --allowed-tools "" : 도구 없이 순수 텍스트 분석만. 예측 가능하고 빠르다.
 #   DB 이력까지 보게 하려면 여기에 Read·Bash 를 열면 된다(히스토리가 쌓인 뒤).
 run_claude() {
+    local model="$1"
     : > "$OUT_FILE"
     : > "$ERR_FILE"
     "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --allowed-tools "" \
-        --model "$MODEL" --fallback-model "$FALLBACK_MODEL" \
+        --model "$model" --fallback-model "$FALLBACK_MODEL" \
         < "$REPORT" > "$OUT_FILE" 2> "$ERR_FILE" &
     local pid=$! wd st
 
@@ -351,9 +352,10 @@ run_claude() {
 ATTEMPTS="${ANALYSIS_ATTEMPTS:-2}"
 RETRY_WAIT_SEC="${ANALYSIS_RETRY_WAIT_SEC:-15}"
 attempt=1
+cur_model="$MODEL"
 while : ; do
-    log "[analyze] $REPORT 분석 시작 — 시도 ${attempt}/${ATTEMPTS} (timeout ${TIMEOUT_SEC}s)"
-    run_claude
+    log "[analyze] $REPORT 분석 시작 — 시도 ${attempt}/${ATTEMPTS} (model=${cur_model}, timeout ${TIMEOUT_SEC}s)"
+    run_claude "$cur_model"
     STATUS=$?
     ANALYSIS="$(cat "$OUT_FILE")"
 
@@ -371,6 +373,15 @@ while : ; do
     if [ "$attempt" -ge "$ATTEMPTS" ]; then
         break
     fi
+
+    # 다음 시도는 다른 모델로 간다. 안전 분류기 거절은 **모델별**이므로 같은 모델에 같은 걸
+    # 다시 물어도 같은 답이 온다. 실제로 2026-09-29 에 sonnet 이 두 번 연달아 거절해
+    # 재시도가 아무 일도 하지 못했다.
+    if [ "$cur_model" != "$FALLBACK_MODEL" ]; then
+        log "[analyze] 다음 시도는 ${FALLBACK_MODEL} 로 바꿉니다 (거절·실패는 모델별로 갈립니다)"
+        cur_model="$FALLBACK_MODEL"
+    fi
+
     attempt=$((attempt + 1))
     sleep "$RETRY_WAIT_SEC"
 done
