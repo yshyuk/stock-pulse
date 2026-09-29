@@ -339,6 +339,7 @@ ls build/test-results/test/TEST-*.xml | wc -l
 | 사용자 설정(`~/.claude`) 훅·MCP | 빈 `HOME` 을 줘도 멈춤. 훅은 `node: command not found` 로 **빠르게 실패**하고 지나감 |
 | 작업 디렉터리 | cwd 를 `~/apps/stock-pulse` 로 맞춰도 셸에서 성공(29초) |
 | **stdin 경로** | 리포트를 프롬프트 인자에 합치고 stdin 을 `/dev/null` 로 줘도 **0바이트로 멈춤** |
+| **pty 할당** | `script -q /dev/null` + stdin 없음 조합도 **멈춤**(197바이트 = 경고 한 줄뿐) |
 | `HOME` 값의 공백 | 실제 결함이었고 고쳤으나(v0.5.5 가드) 멈춤은 그대로 |
 
 **남은 단서.** 멈춴 프로세스를 `sample` 로 뜨면:
@@ -358,22 +359,21 @@ pty 를 붙였을 때만 I/O 가 움직였다(0바이트 → 1217바이트). 그
 
 ### 다음에 할 것 (순서대로)
 
-**1) pty + stdin 없음을 함께 적용해 본다.** 두 변경을 합친 조합은 아직 시험하지 않았다.
-지금까지의 증거가 가리키는 첫 후보다.
+**1) launchd 에서 계단식으로 어디부터 깨지는지 본다.** 지금까지 launchd 테스트는 **전부 실제
+프롬프트로만** 돌렸다. 짧은 프롬프트를 launchd 에서 돌려본 적이 한 번도 없다.
 
-```bash
-/usr/bin/script -q /dev/null /Users/yshyuk/.local/bin/claude \
-  -p "$(cat .../analysis-prompt.md)
-
-$(cat .../reports/YYYY-MM-DD.md)" \
-  --allowed-tools "" --model sonnet --fallback-model opus < /dev/null
+```
+claude --version                     → 즉시 끝나야 정상
+claude -p "한 단어로 답하세요"        → 셸에서는 3초
+claude -p "<실제 프롬프트+리포트>"    → 셸에서는 29초
 ```
 
-알림 없는 임시 launchd 작업(`com.stockpulse.diag`)으로 돌린다. 되면 `analyze-report.sh` 를
-그 형태로 고친다 — pty 할당 + 리포트를 프롬프트에 합치고 `< "$REPORT"` 제거, 출력의 `\r` 정리.
+`--version` 부터 멈추면 기동 단계다. 짧은 프롬프트는 되고 실제 것만 멈추면 요청 크기와
+launchd 조건의 상호작용이다. 갈래가 갈린다.
 
-**2) 안 되면 `sudo fs_usage` 로 `openat` 이 막힌 실제 경로를 본다.** 맥미니에서 직접(화면 앞에서)
-하는 편이 편하다. 경로가 나오면 대개 끝이다.
+**2) `sudo fs_usage` 로 `openat` 이 막힌 실제 경로를 본다.** 맥미니에서 직접(화면 앞에서) 하는
+편이 편하다. `sample` 이 두 스레드가 `openat$NOCANCEL` 에 앉아 있다고 가리키므로, 그 경로가
+나오면 대개 끝이다.
 
 **진단 중 바꿔둔 운영 상태** (되돌리거나 이어받을 것):
 
