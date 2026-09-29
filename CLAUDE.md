@@ -338,6 +338,7 @@ ls build/test-results/test/TEST-*.xml | wc -l
 | `ProcessType: Background` 스로틀링 | `Standard` 로 바꿔도 멈춤 |
 | 사용자 설정(`~/.claude`) 훅·MCP | 빈 `HOME` 을 줘도 멈춤. 훅은 `node: command not found` 로 **빠르게 실패**하고 지나감 |
 | 작업 디렉터리 | cwd 를 `~/apps/stock-pulse` 로 맞춰도 셸에서 성공(29초) |
+| **stdin 경로** | 리포트를 프롬프트 인자에 합치고 stdin 을 `/dev/null` 로 줘도 **0바이트로 멈춤** |
 | `HOME` 값의 공백 | 실제 결함이었고 고쳤으나(v0.5.5 가드) 멈춤은 그대로 |
 
 **남은 단서.** 멈춴 프로세스를 `sample` 로 뜨면:
@@ -349,14 +350,30 @@ TCP                 :443 연결 3개 ESTABLISHED (Anthropic 2, Google 1)
 ```
 
 `--debug` 를 붙여도 `⚠ claude.ai connectors are disabled...` 한 줄 뒤로 아무것도 안 나온다.
-**아주 이른 단계에서 막힌다.** launchd 와 셸의 남은 차이는 **제어 터미널 유무와 stdin 경로**다.
+**아주 이른 단계에서 막힌다.** stdin 까지 배제됐으므로 launchd 와 셸의 남은 차이는
+**제어 터미널 유무 하나**다.
 
-`script` 로 pty 를 붙이면 I/O 가 돌기는 하지만(0바이트 → 1217바이트), pty 에코 때문에 리포트가
-되돌아오고 정규 모드 1024바이트 줄 제한이 있어 16.5KB stdin 통로로는 부적합하다.
+pty 를 붙였을 때만 I/O 가 움직였다(0바이트 → 1217바이트). 그때 걸림돌은 pty 에코로 입력이
+되돌아온 것과 정규 모드 1024바이트 줄 제한이었는데, **stdin 을 쓰지 않으면 둘 다 사라진다.**
 
-**다음에 할 것.** `sudo fs_usage` 로 `openat` 이 막힌 **실제 경로**를 확인한다. 이건 맥미니에서
-직접(화면 앞에서) 해야 편하다. 경로가 나오면 대개 끝이다. 그다음 후보는 stdin 을 쓰지 않고
-리포트를 프롬프트 인자에 합쳐 넘기는 방식(`< "$REPORT"` 제거).
+### 다음에 할 것 (순서대로)
+
+**1) pty + stdin 없음을 함께 적용해 본다.** 두 변경을 합친 조합은 아직 시험하지 않았다.
+지금까지의 증거가 가리키는 첫 후보다.
+
+```bash
+/usr/bin/script -q /dev/null /Users/yshyuk/.local/bin/claude \
+  -p "$(cat .../analysis-prompt.md)
+
+$(cat .../reports/YYYY-MM-DD.md)" \
+  --allowed-tools "" --model sonnet --fallback-model opus < /dev/null
+```
+
+알림 없는 임시 launchd 작업(`com.stockpulse.diag`)으로 돌린다. 되면 `analyze-report.sh` 를
+그 형태로 고친다 — pty 할당 + 리포트를 프롬프트에 합치고 `< "$REPORT"` 제거, 출력의 `\r` 정리.
+
+**2) 안 되면 `sudo fs_usage` 로 `openat` 이 막힌 실제 경로를 본다.** 맥미니에서 직접(화면 앞에서)
+하는 편이 편하다. 경로가 나오면 대개 끝이다.
 
 **진단 중 바꿔둔 운영 상태** (되돌리거나 이어받을 것):
 
