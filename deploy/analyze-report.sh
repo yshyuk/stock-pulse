@@ -23,7 +23,14 @@ set -uo pipefail
 # ── 설정 (launchd EnvironmentVariables 로 주입) ──────────────────────────────
 REPORT_DIR="${STOCKPULSE_REPORT_DIR:-/Users/Shared/stock-pulse/reports}"
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
-TIMEOUT_SEC="${ANALYSIS_TIMEOUT_SEC:-600}"
+# 한 번의 시도에 이 이상 기다리지 않는다.
+#
+# 왜 600 이 아니라 120 인가: 성공한 실행 20여 건이 모두 20~40초에 끝났고, 멈춴 실행은
+# 600초를 기다려도 **한 번도 회복되지 않았다.** 멈춤의 정체는 이미 연결된 TLS 소켓을 물고
+# 응답을 기다리는 상태다(`sample` 로 확인: 메인 스레드 kevent64 + ESTABLISHED 소켓 3개).
+# 상류에서 응답이 오지 않는 것이므로 더 기다려서 해결되지 않는다. 오래 기다리면 재시도만
+# 늦어진다 — 실제로 600초 × 2회 = 20분을 쓰고 아무것도 얻지 못한 날이 이틀 있었다.
+TIMEOUT_SEC="${ANALYSIS_TIMEOUT_SEC:-120}"
 # 모델을 명시한다. 안전 분류기가 확률적으로 요청을 거절하는 경우가 있어
 # (refusal, 예: reasoning_extraction) 폴백 모델을 함께 지정한다.
 MODEL="${ANALYSIS_MODEL:-sonnet}"
@@ -343,14 +350,20 @@ run_claude() {
     return $st
 }
 
-# 실패하면 한 번 더 시도한다.
+# 실패하면 여러 번 시도한다. 빨리 실패하고 넉넉히 다시 묻는다.
 #
-# 왜: 2026-09-25 에 exit=143(타임아웃) + 출력 전무로 그날 분석이 통째로 빠졌다. 성공한
-# 날들은 38~67초에 끝났으니 느린 게 아니라 멈춘 것이고, 타임아웃을 늘려도 해결되지 않는다.
-# 안전 분류기 거절도 확률적으로 발생한다. 두 경우 모두 **두 번째 시도가 정확히 듣는** 형태다.
-# 리포트는 이미 생성·발송된 뒤라 재시도에 드는 비용도 없다.
-ATTEMPTS="${ANALYSIS_ATTEMPTS:-2}"
-RETRY_WAIT_SEC="${ANALYSIS_RETRY_WAIT_SEC:-15}"
+# 멈춤은 **간헐적이고 상류 쪽**이다. 로컬 변수 12개(CLI 버전, 입력 크기, 프롬프트, 인증,
+# PATH·환경변수 전체, ProcessType, 사용자 설정, 훅·MCP, 작업 디렉터리, stdin, pty, launchd
+# 여부)를 하나씩 배제했고 어느 것과도 상관관계가 없었다. 같은 명령이 어느 날은 30초에 끝나고
+# 어느 날은 600초를 기다려도 안 온다.
+#
+# 그래서 대응은 "오래 기다리기" 가 아니라 "빨리 포기하고 다시 묻기" 다. 120초 × 3회 + 간격
+# 60초면 최악 6분이고, 예전 600초 × 2회(20분)보다 짧으면서 시도는 더 많다. 안전 분류기
+# 거절도 확률적이므로 같은 처방이 듣는다(2차 시도부터 모델도 바뀐다).
+#
+# 리포트는 이미 생성·발송된 뒤라 재시도 비용이 없다.
+ATTEMPTS="${ANALYSIS_ATTEMPTS:-3}"
+RETRY_WAIT_SEC="${ANALYSIS_RETRY_WAIT_SEC:-60}"
 attempt=1
 cur_model="$MODEL"
 while : ; do
@@ -404,8 +417,11 @@ plist 의 ANTHROPIC_AUTH_TOKEN 을 갱신하세요."
 
     if [ "$STATUS" -eq 143 ]; then
         HINT="$HINT
-${TIMEOUT_SEC}s 안에 끝나지 않아 중단했습니다. 출력이 전혀 없는 타임아웃은 느린 것이
-아니라 멈춘 것입니다 — ANALYSIS_TIMEOUT_SEC 을 늘리기 전에 claude 가 응답하는지 보세요."
+${TIMEOUT_SEC}s 안에 끝나지 않아 중단했습니다. 정상은 20~40초입니다.
+이 멈춤은 간헐적이며 상류 응답 대기로 확인됐습니다(로컬 변수 12개 배제).
+**ANALYSIS_TIMEOUT_SEC 을 늘리지 마세요** — 600초를 기다려도 회복된 적이 없습니다.
+셸에서 수동 실행하면 대개 통과합니다:
+  bash ~/apps/stock-pulse/analyze-report.sh $RUN_DATE"
     fi
 
     log "[analyze] 실패 (exit=$STATUS, ${ATTEMPTS}회 시도): $DETAIL"
