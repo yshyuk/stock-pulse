@@ -355,7 +355,41 @@ fi
 # ── 분석 ────────────────────────────────────────────────────────────────────
 OUT_FILE="$(mktemp)"
 ERR_FILE="$(mktemp)"
-trap 'rm -f "$OUT_FILE" "$ERR_FILE"' EXIT
+CLEAN_FILE="$(mktemp)"
+DROPPED_FILE="$(mktemp)"
+trap 'rm -f "$OUT_FILE" "$ERR_FILE" "$CLEAN_FILE" "$DROPPED_FILE"' EXIT
+
+# claude 가 stdout 머리에 끼워 넣는 CLI 경고를 걷어낸다.
+#
+# 왜: 실제로 이 줄이 분석 본문 맨 앞에 들어갔다.
+#   ⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set ...
+# 스크립트는 stdout 전체를 분석 결과로 보고 .md 로 저장해 텔레그램·디스코드로 보낸다.
+# 리포트에 실행 환경 잡음이 섞이는 건 이 프로젝트 원칙에 어긋난다.
+#
+# **조용히 버리지 않는다.** 걷어낸 줄은 로그에 남긴다 — 경고 자체가 진단 단서인 경우가 있다.
+# 실제로 이 줄이 "멈추기 전에 출력은 한다" 는 근거가 됐다.
+#
+# 머리 부분만 본다. 본문 중간의 ⚠ 는 분석이 쓴 것일 수 있으므로 건드리지 않는다.
+strip_cli_warnings() {
+    python3 - "$OUT_FILE" "$CLEAN_FILE" "$DROPPED_FILE" <<'PYEOF'
+import pathlib, sys
+src, clean, dropped = (pathlib.Path(a) for a in sys.argv[1:4])
+lines = src.read_text(errors="replace").split("\n")
+drop, i = [], 0
+while i < len(lines):
+    s = lines[i].strip()
+    if s.startswith("⚠"):          # ⚠ 로 시작하는 경고 줄
+        drop.append(s)
+        i += 1
+        continue
+    if s == "" and drop:                # 경고 뒤의 빈 줄
+        i += 1
+        continue
+    break
+clean.write_text("\n".join(lines[i:]))
+dropped.write_text("\n".join(drop))
+PYEOF
+}
 
 # 한 번 호출한다. 종료코드를 돌려주고 출력은 OUT_FILE·ERR_FILE 에 남긴다.
 #
@@ -410,7 +444,17 @@ while : ; do
     log "[analyze] $REPORT 분석 시작 — 시도 ${attempt}/${ATTEMPTS} (model=${cur_model}, timeout ${TIMEOUT_SEC}s)"
     run_claude "$cur_model"
     STATUS=$?
-    ANALYSIS="$(cat "$OUT_FILE")"
+
+    # 경고를 걷어낸 뒤의 본문으로 성공 여부를 판단한다. 경고만 돌아온 응답은 성공이 아니다.
+    strip_cli_warnings
+    ANALYSIS="$(cat "$CLEAN_FILE")"
+    if [ -s "$DROPPED_FILE" ]; then
+        # `|| [ -n "$_w" ]` 가 필요하다. 마지막 줄에 개행이 없으면 read 가 비정상 종료코드를
+        # 돌려주면서 그 줄을 버린다 — 실제로 이 가드 없이 짰더니 제거는 됐는데 로그가 비었다.
+        while IFS= read -r _w || [ -n "$_w" ]; do
+            [ -n "$_w" ] && log "[analyze] CLI 경고 제거: $_w"
+        done < "$DROPPED_FILE"
+    fi
 
     if [ "$STATUS" -eq 0 ] && [ -n "$ANALYSIS" ]; then
         break
