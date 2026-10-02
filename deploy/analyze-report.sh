@@ -298,8 +298,44 @@ if [ ! -x "$CLAUDE_BIN" ]; then
     log "[analyze] claude CLI 를 찾을 수 없음: $CLAUDE_BIN"
     notify "⚠️ StockPulse 2차 분석 실패 ($RUN_DATE)
 claude CLI 를 찾을 수 없습니다: $CLAUDE_BIN
-CLAUDE_BIN 환경변수를 확인하세요."
+CLAUDE_BIN 환경변수를 확인하세요.
+
+버전을 고정해 둔 경우, 업데이터가 그 버전을 정리했을 수 있습니다.
+설치된 버전 목록: ls -lt ~/.local/share/claude/versions/"
     exit 1
+fi
+
+# 어느 바이너리로 돌렸는지 매 실행 기록한다.
+#
+# 왜: claude 는 저절로 업데이트된다. 실제로 2026-09-15 → 09-24 → 09-27 → 10-02 네 번
+# 바뀌었고(2.1.272 → 281 → 283 → 287), `~/.local/bin/claude` 는 심볼릭 링크라 대화형
+# 세션이 업데이트하면 무인 배치가 쓰는 바이너리도 같이 바뀐다. 예고 없이 바뀌는 의존성을
+# 디버깅하는 데 이틀을 썼다. 버전을 로그와 분석 파일에 남겨두면 "그날 무엇이 돌았는가" 를
+# 나중에도 알 수 있다.
+#
+# --version 호출에 워치독을 두고 DISABLE_AUTOUPDATER 를 준다. 이 호출이 업데이트 확인을
+# 트리거해 매달리면 본론 전에 죽는다 — 이 스크립트의 역사가 전부 그런 멈춤이었다.
+CLAUDE_VERSION="(확인 실패)"
+_vf="$(mktemp)"
+( DISABLE_AUTOUPDATER=1 "$CLAUDE_BIN" --version >"$_vf" 2>&1 ) &
+_vp=$!
+( sleep 20; kill -0 "$_vp" 2>/dev/null && kill "$_vp" 2>/dev/null ) >/dev/null 2>&1 &
+_vw=$!
+disown "$_vw" 2>/dev/null || true
+if wait "$_vp"; then
+    CLAUDE_VERSION="$(head -1 "$_vf" | tr -d '\r')"
+fi
+kill "$_vw" 2>/dev/null
+rm -f "$_vf"
+log "[analyze] claude 버전: $CLAUDE_VERSION  ($CLAUDE_BIN)"
+
+# 기대 버전을 지정해 두면 바뀌었을 때 로그로 알린다. 실패시키지는 않는다 —
+# 버전이 올라간 것만으로 그날 분석을 버릴 이유는 없다.
+if [ -n "${ANALYSIS_CLAUDE_VERSION:-}" ]; then
+    case "$CLAUDE_VERSION" in
+        *"$ANALYSIS_CLAUDE_VERSION"*) ;;
+        *) log "[analyze] 주의: 기대 버전과 다릅니다 — 기대 '$ANALYSIS_CLAUDE_VERSION', 실제 '$CLAUDE_VERSION'" ;;
+    esac
 fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -329,6 +365,10 @@ run_claude() {
     local model="$1"
     : > "$OUT_FILE"
     : > "$ERR_FILE"
+    # DISABLE_AUTOUPDATER: 무인 배치가 공용 설치본을 갱신하지 않게 한다. 이게 없으면 새벽
+    # 배치가 대화형 세션이 쓰는 바이너리를 바꿔놓는다(그 반대도 마찬가지다). 업데이트는
+    # 사람이 의도해서 하는 게 맞다.
+    DISABLE_AUTOUPDATER=1 \
     "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --allowed-tools "" \
         --model "$model" --fallback-model "$FALLBACK_MODEL" \
         < "$REPORT" > "$OUT_FILE" 2> "$ERR_FILE" &
@@ -440,7 +480,7 @@ ANALYSIS_FILE="$REPORT_DIR/$RUN_DATE.analysis.md"
 {
     echo "# StockPulse 2차 분석 — $RUN_DATE"
     echo
-    echo "> Claude Code CLI 로 생성. 원본 리포트: $(basename "$REPORT")"
+    echo "> Claude Code CLI $CLAUDE_VERSION · 모델 ${cur_model} · 원본 리포트: $(basename "$REPORT")"
     echo
     echo "$ANALYSIS"
 } > "$ANALYSIS_FILE"

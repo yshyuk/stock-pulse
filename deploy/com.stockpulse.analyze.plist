@@ -56,9 +56,27 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- claude CLI 절대경로. `which claude` 로 확인해 넣을 것. -->
+        <!-- claude CLI 절대경로.
+             `~/.local/bin/claude` 는 심볼릭 링크이고 claude 는 저절로 업데이트된다
+             (2026-09-15 → 09-24 → 09-27 → 10-02 네 번 바뀜). 대화형 세션이 업데이트하면
+             무인 배치가 쓰는 바이너리도 같이 바뀐다.
+
+             버전을 고정하려면 링크 대신 버전 경로를 직접 넣는다:
+               /Users/REPLACE_ME_USERNAME/.local/share/claude/versions/2.1.287
+             단, 업데이터가 옛 버전을 정리하면 그 경로가 사라진다. 사라지면 스크립트가
+             시작 시점에 실패하며 알리므로 조용히 깨지지는 않는다.
+
+             고정하지 않아도 스크립트가 매 실행 버전을 로그와 분석 파일에 남긴다. -->
         <key>CLAUDE_BIN</key>
         <string>/Users/REPLACE_ME_USERNAME/.local/bin/claude</string>
+
+        <!-- 기대하는 claude 버전(선택). 지정하면 실제 버전이 다를 때 로그로 알린다.
+             실패시키지는 않는다 — 버전이 올라간 것만으로 그날 분석을 버릴 이유는 없다. -->
+        <!--
+        <key>ANALYSIS_CLAUDE_VERSION</key>
+        <string>2.1.287</string>
+        -->
+
 
         <!-- `claude setup-token` 으로 발급한 장수명 토큰.
              claude 의 OAuth 세션은 만료되며, 만료되면 아무 설명 없이 exit 1 로 죽는다.
@@ -80,9 +98,14 @@
         <key>DISCORD_WEBHOOK_URL</key>
         <string>REPLACE_ME</string>
 
-        <!-- claude 가 응답하지 않을 때 끊는 시간(초). -->
+        <!-- claude 가 응답하지 않을 때 끊는 시간(초).
+             **여기에 값을 넣지 않는 것을 권한다.** 스크립트 기본값(120)이 관측치에 맞춰
+             정해져 있고, plist 값이 그 기본값을 덮는다. 성공은 전부 20~40초였고 멈춤은
+             600초를 기다려도 회복된 적이 없다 — 늘리면 재시도만 늦어진다. -->
+        <!--
         <key>ANALYSIS_TIMEOUT_SEC</key>
-        <string>600</string>
+        <string>120</string>
+        -->
 
         <!-- 배치가 끝날 때까지 기다릴 시간(초). 맥이 예약 시각에 자고 있으면 배치가
              늦게 끝나므로, 고정 시각에 한 번 보고 포기하면 그날 분석이 빠진다. -->
