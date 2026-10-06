@@ -43,13 +43,32 @@
     <string>/Users/REPLACE_ME_USERNAME/apps/stock-pulse</string>
 
     <!-- 배치(06:00)가 끝난 뒤. 전종목 수집이 약 20초이므로 10분이면 충분하다. -->
+    <!-- 여러 시각에 호출한다. 멈춤은 구간 단위여서(2026-10-05 에 8분 30초 동안 3회 모두
+         멈춤) 한 실행 안에서 재시도를 늘려봐야 같은 구간에 머문다. 시간을 벌려야 한다.
+
+         이미 그날 분석이 있으면 스크립트가 즉시 종료하므로 중복 발송은 없다.
+         1차에 성공하면 07:10·09:10 호출은 아무것도 하지 않는다. -->
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>6</integer>
-        <key>Minute</key>
-        <integer>10</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>6</integer>
+            <key>Minute</key>
+            <integer>10</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>7</integer>
+            <key>Minute</key>
+            <integer>10</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>9</integer>
+            <key>Minute</key>
+            <integer>10</integer>
+        </dict>
+    </array>
 
     <key>RunAtLoad</key>
     <false/>
