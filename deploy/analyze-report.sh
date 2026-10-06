@@ -49,6 +49,7 @@ PROMPT_FILE="${ANALYSIS_PROMPT_FILE:-$SCRIPT_DIR/analysis-prompt.md}"
 
 RUN_DATE="${1:-$(date +%F)}"
 REPORT="$REPORT_DIR/$RUN_DATE.md"
+ANALYSIS_FILE="$REPORT_DIR/$RUN_DATE.analysis.md"
 
 log() { echo "$(date '+%Y-%m-%dT%H:%M:%S%z') $*"; }
 
@@ -220,6 +221,21 @@ notify_file() {
 }
 
 # ── 전제 조건 ───────────────────────────────────────────────────────────────
+
+# 이미 오늘 분석이 있으면 아무 일도 하지 않는다.
+#
+# 왜: 멈춤은 **구간 단위**다. 2026-10-05 에 120초 × 3회(8분 30초)를 sonnet·opus 양쪽으로
+# 썼는데 세 번 다 멈췄다. 09-25·09-28 도 연속 실패였다. 반면 되는 날은 1차 시도가
+# 18~40초에 끝난다. 즉 **몇 분 안에 다시 묻는 것은 거의 무의미하고, 시간을 벌려야 한다.**
+#
+# 그래서 launchd 에 여러 시각(06:10 / 07:10 / 09:10)을 등록하고, 이 가드로 중복을 막는다.
+# 1차에 성공하면 나머지 호출은 즉시 끝나고 아무것도 보내지 않는다.
+#
+# ANALYSIS_FORCE=1 을 주면 이미 있어도 다시 만든다(수동 재생성용).
+if [ -s "$ANALYSIS_FILE" ] && [ "${ANALYSIS_FORCE:-0}" != "1" ]; then
+    log "[analyze] 이미 분석이 있습니다: $ANALYSIS_FILE — 종료 (다시 만들려면 ANALYSIS_FORCE=1)"
+    exit 0
+fi
 
 # 주입된 경로 환경변수의 위생을 먼저 본다.
 #
@@ -424,7 +440,17 @@ run_claude() {
     return $st
 }
 
-# 실패하면 여러 번 시도한다. 빨리 실패하고 넉넉히 다시 묻는다.
+# 한 번의 실행 안에서는 두 번만 시도한다.
+#
+# 2026-10-05 데이터가 방향을 바꿨다 — 120초 × 3회(8분 30초)를 sonnet·opus 양쪽으로 썼는데
+# 세 번 다 멈췄다. 멈춤은 요청 단위 무작위가 아니라 **구간 단위**다. 한 실행 안에서 시도를
+# 늘리는 것은 거의 쓸모가 없다.
+#
+# 그래서 2회만 한다(2차에서 모델이 바뀌므로 안전 분류기 거절에는 이것으로 충분하다).
+# 구간을 벗어나는 일은 **launchd 가 여러 시각에 호출하는 것**으로 처리한다 —
+# 06:10 / 07:10 / 09:10. 이미 분석이 있으면 위쪽 가드가 즉시 종료시킨다.
+#
+# 리포트는 이미 생성·발송된 뒤라 재시도 비용이 없다.
 #
 # 멈춤은 **간헐적이고 상류 쪽**이다. 로컬 변수 12개(CLI 버전, 입력 크기, 프롬프트, 인증,
 # PATH·환경변수 전체, ProcessType, 사용자 설정, 훅·MCP, 작업 디렉터리, stdin, pty, launchd
@@ -436,7 +462,7 @@ run_claude() {
 # 거절도 확률적이므로 같은 처방이 듣는다(2차 시도부터 모델도 바뀐다).
 #
 # 리포트는 이미 생성·발송된 뒤라 재시도 비용이 없다.
-ATTEMPTS="${ANALYSIS_ATTEMPTS:-3}"
+ATTEMPTS="${ANALYSIS_ATTEMPTS:-2}"
 RETRY_WAIT_SEC="${ANALYSIS_RETRY_WAIT_SEC:-60}"
 attempt=1
 cur_model="$MODEL"
@@ -520,7 +546,6 @@ fi
 log "[analyze] 완료 — ${#ANALYSIS}자"
 
 # ── 저장 + 발송 ─────────────────────────────────────────────────────────────
-ANALYSIS_FILE="$REPORT_DIR/$RUN_DATE.analysis.md"
 {
     echo "# StockPulse 2차 분석 — $RUN_DATE"
     echo
