@@ -54,7 +54,7 @@ Java 21 / Spring Boot 3.3.5 / Gradle(Kotlin DSL) / MySQL(prod)·H2(local) / JUni
 
 ### 구조
 ```
-~/Documents/Repository/stock-pulse   레포 (TCC 보호 폴더 — launchd가 읽지 못함)
+~/Repository/stock-pulse             레포
 ~/apps/stock-pulse/                  실행 산출물 (jar, analyze-report.sh, analysis-prompt.md)
 ~/Library/LaunchAgents/              com.stockpulse.batch.plist, com.stockpulse.analyze.plist
 /Users/Shared/stock-pulse/           reports/, plan/, logs/

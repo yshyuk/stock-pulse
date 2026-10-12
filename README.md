@@ -235,7 +235,7 @@ pmset -g sched            # 예약 확인
 self-hosted 러너가 없거나 즉시 반영해야 할 때 씁니다.
 
 ```bash
-cd ~/Documents/Repository/stock-pulse
+cd ~/Repository/stock-pulse
 git checkout release && git pull origin release
 ./deploy/install.sh              # 빌드 + jar·스크립트·프롬프트를 ~/apps 로
 ./deploy/install.sh --no-build   # 이미 빌드했다면 배포만
