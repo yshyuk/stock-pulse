@@ -190,6 +190,17 @@ class ReportPayloadBuilderTest {
                 .hasMessageContaining("sessionDate");
     }
 
+    /** 심볼 없는 지표는 evidenceId 가 "pulse-…:null" 이 되어 인용 가능한 가짜 근거가 된다 — 조용히 내보내지 않는다. */
+    @Test
+    void nullMetricSymbolFailsFast() {
+        StockMetric noSymbol = StockMetric.builder().name("이름만").price(new BigDecimal("1000")).build();
+        ScreeningResult bad = new ScreeningResult(List.of(noSymbol), 1, 1, Map.of());
+
+        assertThatThrownBy(() -> builder.build(report("본문"), bad, sessionDate))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("symbol");
+    }
+
     @Test
     void jsonFieldOrderFixed() {
         ScreeningResult one = new ScreeningResult(

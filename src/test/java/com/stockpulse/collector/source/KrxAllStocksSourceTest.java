@@ -140,6 +140,24 @@ class KrxAllStocksSourceTest {
         assertThat(server.takeRequest().getPath()).contains("basDd=20260908");
     }
 
+    /**
+     * The session the rows actually came from travels with each item. After a holiday that is NOT
+     * "the weekday before the run date" — the report payload stamps dataAsOf with it, so it must be
+     * the session KRX answered for, never an approximation.
+     */
+    @Test
+    void itemsCarryTheSessionKrxActuallyAnsweredFor() {
+        server.enqueue(json(EMPTY));   // 09-09 KOSPI  (pretend holiday)
+        server.enqueue(json(EMPTY));   // 09-09 KOSDAQ
+        server.enqueue(json(KOSPI));   // 09-08 KOSPI
+        server.enqueue(json(KOSDAQ));  // 09-08 KOSDAQ
+
+        List<RawData> items = source().collect(LocalDate.parse("2026-09-10"));
+
+        assertThat(items).isNotEmpty()
+                .allMatch(i -> LocalDate.parse("2026-09-08").equals(i.getSessionDate()));
+    }
+
     @Test
     void givesUpAfterTheLookbackWindowInsteadOfLoopingForever() {
         props.getCollector().getKrxAll().setMaxLookbackDays(2);

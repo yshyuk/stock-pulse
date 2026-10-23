@@ -71,6 +71,11 @@ public final class ScreeningEvidenceSerializer {
         ArrayNode items = root.putArray("items");
         Map<String, List<String>> ruleHits = screened.ruleHits() == null ? Map.of() : screened.ruleHits();
         for (StockMetric m : screened.metrics()) {
+            if (m.getSymbol() == null || m.getSymbol().isBlank()) {
+                // "<reportId>:null" would be a citable evidence ID that refers to nothing
+                throw new IllegalArgumentException("screened metric without a symbol cannot become evidence (name="
+                        + m.getName() + ")");
+            }
             items.add(item(reportId, m, ruleHits.getOrDefault(m.getSymbol(), List.of())));
         }
         return root;

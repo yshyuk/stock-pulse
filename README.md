@@ -134,6 +134,10 @@ java -jar build/libs/stock-pulse.jar
 | `STOCKPULSE_ANALYSIS_ENABLED` | Claude 2차 분석 자동화 on/off | 기본 `false` |
 | `ANTHROPIC_API_KEY` | Claude API 키 | analysis 활성 시 필수, **민감** |
 | `STOCKPULSE_ANALYSIS_MODEL` | 2차 분석 모델 | 기본 `claude-opus-4-8` |
+| `STOCKPULSE_REPORT_DISPATCH_ENABLED` | 저장된 리포트를 stock-api `/v1/signals/reports` 로 전송 on/off | 기본 `false`. v2 플랜 전송(`STOCKPULSE_DISPATCH_*`)과 별개 |
+| `STOCKPULSE_REPORT_DISPATCH_URL` | 리포트 수신 엔드포인트 전체 URL | 미설정 시 전송 안 함 |
+| `STOCKPULSE_REPORT_DISPATCH_API_KEY` | 에이전트 API 키(헤더 `X-Agent-Signal-Key`) | **민감**, 미설정 시 전송 안 함 |
+| `STOCKPULSE_REPORT_DISPATCH_MAX_ATTEMPTS` / `_RETRY_DELAY_MS` / `_TIMEOUT_SEC` | 시도 횟수 / 재시도 간격 / 요청 타임아웃 | 기본 3 / 2000ms / 10초. 재시도는 연결 오류·타임아웃·5xx 만 |
 
 모든 민감정보는 코드/yml에 하드코딩하지 않고 환경변수로만 주입합니다.
 
