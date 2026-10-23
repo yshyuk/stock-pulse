@@ -63,6 +63,39 @@ public class StockPulseProperties {
     @NestedConfigurationProperty
     private Dispatch dispatch = new Dispatch();
 
+    @NestedConfigurationProperty
+    private ReportDispatch reportDispatch = new ReportDispatch();
+
+    /**
+     * Outbound delivery of the finished report to stock-api {@code /v1/signals/reports} (the
+     * daily PAPER strategy's input). Separate from {@link Dispatch} on purpose: turning one on
+     * must never turn the other on. Off by default.
+     *
+     * <p>Unlike the plan hand-off, the outcome is result-confirming — the api answers created /
+     * duplicate / conflict / invalid and the batch reports which. It is still never fatal.
+     */
+    @Getter
+    @Setter
+    public static class ReportDispatch {
+        /** When true (and URL + key are set), the batch pushes the stored report downstream. */
+        private boolean enabled = false;
+
+        /** Full ingest endpoint, e.g. {@code http://127.0.0.1:8081/v1/signals/reports}. */
+        private String url;
+
+        /** Shared secret sent as the agent API-key header. Env-injected. */
+        private String apiKey;
+
+        /** Total attempts including the first. Only connection errors, timeouts and 5xx retry. */
+        private int maxAttempts = 3;
+
+        /** Fixed delay between attempts. */
+        private long retryDelayMs = 2000;
+
+        /** Per-attempt request timeout. */
+        private int timeoutSeconds = 10;
+    }
+
     /**
      * Outbound delivery of the day's plan to an external execution system (stock-api
      * SignalIngest). Off by default: without this the plan stays a local artifact.

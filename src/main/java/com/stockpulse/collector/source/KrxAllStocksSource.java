@@ -130,7 +130,7 @@ public class KrxAllStocksSource implements DataSource {
                 continue;
             }
             for (JsonNode row : rows) {
-                RawData item = toRawData(row, now);
+                RawData item = toRawData(row, now, sessionDate);
                 if (item != null) {
                     items.add(item);
                 }
@@ -140,7 +140,7 @@ public class KrxAllStocksSource implements DataSource {
     }
 
     /** One quote, or null when a required field is missing/unparseable (e.g. a halted ticker). */
-    private RawData toRawData(JsonNode row, Instant fetchedAt) {
+    private RawData toRawData(JsonNode row, Instant fetchedAt, LocalDate sessionDate) {
         String symbol = text(row, "ISU_CD");
         Long close = num(row, "TDD_CLSPRC");
         Long volume = num(row, "ACC_TRDVOL");
@@ -163,6 +163,7 @@ public class KrxAllStocksSource implements DataSource {
                 .symbol(symbol)
                 .name(name == null ? symbol : name)
                 .fetchedAt(fetchedAt)
+                .sessionDate(sessionDate) // the session KRX answered for — see CollectionResult#sessionDate
                 .payload(payload)
                 .build();
     }
