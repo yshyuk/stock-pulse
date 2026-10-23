@@ -6,8 +6,10 @@ package com.stockpulse.report.dispatch;
  * <ul>
  *   <li>{@code CREATED} — the api stored a new report (it answers 202; 201 is accepted too).</li>
  *   <li>{@code DUPLICATE} — 200: the same reportId with the same hash was already there. Success.</li>
- *   <li>{@code CONFLICT} — 409: the same reportId with a DIFFERENT body (a same-day re-run whose
- *       content changed). Retrying cannot change that answer, so it is reported, not retried.</li>
+ *   <li>{@code CONFLICT} — 409: the same reportId with a DIFFERENT body. Expected, not a failure:
+ *       the rendered report body carries a "생성 시각" (generated-at) line, so any same-day re-run
+ *       gets a new reportHash and the api keeps the first report. Retrying cannot change that
+ *       answer, so it is reported, not retried.</li>
  *   <li>{@code INVALID} — any other 4xx (or an unexpected status). Not retried.</li>
  *   <li>{@code FAILED} — connection errors / timeouts / 5xx on every attempt.</li>
  *   <li>{@code SKIPPED} — deliberately not sent; {@link #reason()} says why.</li>
