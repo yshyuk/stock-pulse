@@ -5,6 +5,20 @@
 
 ---
 
+## [0.6.0] - 2026-10-27
+
+### 새 기능
+- **stock-api 리포트 전송 `ReportDispatcher`** (#54, stock-api PAPER 일일 전략 M1 연계). 배치가 저장한 최종 리포트를
+  stock-api `POST /v1/signals/reports` 로 보낸다. 전략 생성은 api 가 하고 pulse 는 전송만 한다(api ADR-004).
+  - **기본 off** — `STOCKPULSE_REPORT_DISPATCH_ENABLED`·`_URL`·`_API_KEY`. v2 플랜 전송(`STOCKPULSE_DISPATCH_*`)과 별개.
+  - 페이로드: 렌더 본문 + 구조화 선별 JSON(evidenceId·지표·누락 목록) + `reportId=pulse-<tradeDate>` +
+    `reportHash` + `dataAsOf=세션일 15:30 KST`. 누락 지표를 0 으로 채우지 않는다.
+  - KRX 가 실제로 응답한 세션일을 사용한다(`KRX_ALL_ENABLED=true` 필요, 없으면 SKIPPED).
+  - 결과: CREATED · DUPLICATE · CONFLICT · INVALID(4xx, 재시도 없음) · FAILED(연결·타임아웃·5xx 재시도 후).
+    어떤 결과도 배치를 실패시키지 않으며, 성공 알림에 결과 한 줄이 붙는다.
+  - 같은 날 재실행은 본문의 생성 시각 때문에 항상 CONFLICT — api 는 첫 리포트를 유지한다(정상).
+  - 선행 조건: stock-api v0.9.1(에이전트 키 인증 컨텍스트 경로 수정). 그 전에는 401 → INVALID.
+
 ## [0.5.10] - 2026-10-06
 
 ### 버그 수정
