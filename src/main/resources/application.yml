@@ -100,6 +100,17 @@ stockpulse:
     max-attempts: ${STOCKPULSE_DISPATCH_MAX_ATTEMPTS:3}
     retry-delay-ms: ${STOCKPULSE_DISPATCH_RETRY_DELAY_MS:2000}
     timeout-seconds: ${STOCKPULSE_DISPATCH_TIMEOUT_SEC:10}
+  # 저장된 리포트를 stock-api /v1/signals/reports 로 전송 (PAPER 일일 전략 입력, M1).
+  # 위 dispatch(v2 플랜)와 별개 설정이다 — 한쪽을 켜도 다른 쪽은 켜지지 않는다. 기본 off.
+  # 결과(CREATED/DUPLICATE/CONFLICT/INVALID/FAILED/SKIPPED)는 성공 알림에 한 줄로 표시되며,
+  # 어떤 결과도 배치 실패가 아니다. 재시도는 연결 오류·타임아웃·5xx 만(매번 같은 바이트).
+  report-dispatch:
+    enabled: ${STOCKPULSE_REPORT_DISPATCH_ENABLED:false}
+    url: ${STOCKPULSE_REPORT_DISPATCH_URL:}
+    api-key: ${STOCKPULSE_REPORT_DISPATCH_API_KEY:}
+    max-attempts: ${STOCKPULSE_REPORT_DISPATCH_MAX_ATTEMPTS:3}
+    retry-delay-ms: ${STOCKPULSE_REPORT_DISPATCH_RETRY_DELAY_MS:2000}
+    timeout-seconds: ${STOCKPULSE_REPORT_DISPATCH_TIMEOUT_SEC:10}
   # External dead-man's-switch heartbeat (e.g. healthchecks.io). Empty disables it.
   heartbeat:
     url: ${STOCKPULSE_HEARTBEAT_URL:}

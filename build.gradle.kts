@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.stockpulse"
-version = "0.5.10"
+version = "0.6.0"
 
 java {
     toolchain {

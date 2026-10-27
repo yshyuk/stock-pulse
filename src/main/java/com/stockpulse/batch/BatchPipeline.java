@@ -23,6 +23,9 @@ import com.stockpulse.plan.TradingPlan;
 import com.stockpulse.plan.dispatch.DispatchResult;
 import com.stockpulse.plan.dispatch.PlanDispatcher;
 import com.stockpulse.report.ReportService;
+import com.stockpulse.report.dispatch.ReportDispatchResult;
+import com.stockpulse.report.dispatch.ReportDispatcher;
+import com.stockpulse.report.dispatch.ReportPayloadBuilder;
 import com.stockpulse.screening.ScreeningResult;
 import com.stockpulse.screening.ScreeningStage;
 import com.stockpulse.storage.ReportStore;
@@ -36,6 +39,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -43,7 +47,8 @@ import java.util.List;
  * Orchestrates the dawn pipeline as a single pass:
  *
  * <pre>
- *   collect -> process -> [empty-run guard] -> render report -> (analyze) -> store -> notify
+ *   collect -> process -> [empty-run guard] -> render report -> (analyze) -> store
+ *           -> plan hand-off -> report hand-off -> notify
  * </pre>
  *
  * <p>The empty-run guard is what stops a misconfigured run from succeeding quietly: no prices on
@@ -58,6 +63,8 @@ import java.util.List;
 public class BatchPipeline {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    /** The market's calendar: "today" for the report hand-off is the KST date. */
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final CredentialExpiryChecker credentialExpiryChecker;
     private final CollectorService collectorService;
@@ -72,6 +79,8 @@ public class BatchPipeline {
     private final ScreeningStage screeningStage;
     private final ReportService reportService;
     private final ReportAnalyzer reportAnalyzer;
+    private final ReportPayloadBuilder reportPayloadBuilder;
+    private final ReportDispatcher reportDispatcher;
     private final List<ReportStore> reportStores;
     private final NotificationService notificationService;
     private final StockPulseProperties properties;
@@ -90,6 +99,8 @@ public class BatchPipeline {
                          ScreeningStage screeningStage,
                          ReportService reportService,
                          ReportAnalyzer reportAnalyzer,
+                         ReportPayloadBuilder reportPayloadBuilder,
+                         ReportDispatcher reportDispatcher,
                          List<ReportStore> reportStores,
                          NotificationService notificationService,
                          StockPulseProperties properties,
@@ -107,6 +118,8 @@ public class BatchPipeline {
         this.screeningStage = screeningStage;
         this.reportService = reportService;
         this.reportAnalyzer = reportAnalyzer;
+        this.reportPayloadBuilder = reportPayloadBuilder;
+        this.reportDispatcher = reportDispatcher;
         this.reportStores = reportStores;
         this.notificationService = notificationService;
         this.properties = properties;
@@ -225,8 +238,13 @@ public class BatchPipeline {
             //     downstream today", never a failed batch and never a forced order.
             DispatchResult dispatch = planDispatcher.dispatch(plan);
 
+            // 5c) hand the SAME report that was just stored to stock-api (daily PAPER strategy
+            //     input). Result-confirming but never fatal: the outcome goes into the message below.
+            ReportDispatchResult reportDispatch =
+                    dispatchReport(runDate, degraded, collected.sessionDate(), report, screened);
+
             // 6) notify success — surfacing a failed hand-off, which is otherwise invisible
-            notificationService.broadcast(successMessage(report, screened, start, dispatch));
+            notificationService.broadcast(successMessage(report, screened, start, dispatch, reportDispatch));
 
             log.info("==== StockPulse batch pipeline SUCCESS in {} ====", elapsed(start));
         } catch (Exception e) {
@@ -259,6 +277,45 @@ public class BatchPipeline {
                     .build());
         } catch (Exception e) {
             log.error("[pipeline] credential expiry check failed: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Step 5c. Decides whether the report may go out, then sends it. Every refusal is a SKIPPED
+     * with a reason rather than a guess:
+     * <ul>
+     *   <li>degraded — the prices are untrustworthy, same rule as the plan (F-13)</li>
+     *   <li>rerun of past date — the payload is keyed by TODAY ({@code pulse-<tradeDate>}), so a
+     *       backfill would publish old data under today's report id</li>
+     *   <li>session date unavailable — {@code dataAsOf} must be the session the prices came from,
+     *       which only a source that knows it (KRX) can say; approximating it is wrong after holidays</li>
+     * </ul>
+     * Anything thrown here becomes FAILED — the batch never fails because of this hand-off.
+     */
+    private ReportDispatchResult dispatchReport(LocalDate runDate, boolean degraded, LocalDate sessionDate,
+                                                Report report, ScreeningResult screened) {
+        try {
+            if (!reportDispatcher.isEnabled()) {
+                return ReportDispatchResult.skipped(ReportDispatchResult.DISABLED);
+            }
+            LocalDate today = LocalDate.ofInstant(clock.instant(), KST);
+            ReportDispatchResult skip = null;
+            if (degraded) {
+                skip = ReportDispatchResult.skipped("degraded");
+            } else if (!runDate.equals(today)) {
+                skip = ReportDispatchResult.skipped("rerun of past date");
+            } else if (sessionDate == null) {
+                skip = ReportDispatchResult.skipped("session date unavailable");
+            }
+            if (skip != null) {
+                log.warn("[pipeline] report dispatch skipped: {} (runDate={}, today={}, session={})",
+                        skip.reason(), runDate, today, sessionDate);
+                return skip;
+            }
+            return reportDispatcher.dispatch(reportPayloadBuilder.build(report, screened, sessionDate, today));
+        } catch (Exception e) {
+            log.error("[pipeline] report dispatch failed: {}", e.getMessage(), e);
+            return ReportDispatchResult.failed(0, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
@@ -313,12 +370,13 @@ public class BatchPipeline {
     }
 
     private NotificationMessage successMessage(Report report, ScreeningResult screened, Instant start,
-                                               DispatchResult dispatch) {
+                                               DispatchResult dispatch, ReportDispatchResult reportDispatch) {
         Path reportFile = Path.of(properties.getReportDir())
                 .resolve(report.getReportDate().format(DATE) + report.getFormat().fileExtension());
         String title = "✅ StockPulse 리포트 생성 완료 (" + report.getReportDate().format(DATE) + ")";
         String body = "종목 " + stockCountNotice(screened) + ", 소요 " + elapsed(start)
-                + dispatchNotice(dispatch) + "\n\n" + report.getContent();
+                + dispatchNotice(dispatch) + reportDispatchNotice(reportDispatch)
+                + "\n\n" + report.getContent();
         return NotificationMessage.builder()
                 .severity(NotificationMessage.Severity.SUCCESS)
                 .title(title)
@@ -346,6 +404,27 @@ public class BatchPipeline {
         }
         return "\n\n⚠️ 플랜 전송 실패 (" + dispatch.attempts() + "회 시도) — 오늘 실행 시스템에 "
                 + "agent 신호가 전달되지 않았습니다. 원인: " + dispatch.reason();
+    }
+
+    /**
+     * One line about the report hand-off whenever it is switched on — including CREATED, because
+     * the api's verdict (DUPLICATE, CONFLICT on a changed re-run) is the thing to confirm.
+     * Nothing when the feature is off, which is the default.
+     */
+    private String reportDispatchNotice(ReportDispatchResult result) {
+        if (result == null || result.isDisabled()) {
+            return "";
+        }
+        boolean ok = result.status() == ReportDispatchResult.Status.CREATED
+                || result.status() == ReportDispatchResult.Status.DUPLICATE;
+        String line = "\n\n" + (ok ? "📨" : "⚠️") + " 리포트 전송(stock-api): " + result.status();
+        if (result.attempts() > 0) {
+            line += " (" + result.attempts() + "회 시도)";
+        }
+        if (result.reason() != null) {
+            line += " — " + result.reason();
+        }
+        return line;
     }
 
     private void safeNotifyFailure(Exception e, Instant start) {

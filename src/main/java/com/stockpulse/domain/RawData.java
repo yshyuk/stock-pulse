@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Value;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -33,4 +34,12 @@ public class RawData {
 
     /** When this item was fetched. */
     Instant fetchedAt;
+
+    /**
+     * The market session this item's prices belong to, when the source KNOWS it (KRX answers for
+     * an explicit {@code basDd}). Null for realtime sources, which cannot say which close they
+     * returned. Never filled with an approximation — the report payload stamps {@code dataAsOf}
+     * from it, and "the weekday before the run date" is wrong after every holiday.
+     */
+    LocalDate sessionDate;
 }

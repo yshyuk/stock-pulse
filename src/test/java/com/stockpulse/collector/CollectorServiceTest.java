@@ -79,4 +79,57 @@ class CollectorServiceTest {
         assertThat(result.hasRequiredFailure()).isFalse();
         assertThat(result.items()).isEmpty();
     }
+
+    /** A source that reports which market session its rows belong to (KRX does). */
+    private static DataSource sessionSource(String name, java.time.LocalDate session) {
+        return new DataSource() {
+            public String sourceName() {
+                return name;
+            }
+
+            public boolean isEnabled() {
+                return true;
+            }
+
+            public List<RawData> collect(java.time.LocalDate runDate) {
+                return List.of(RawData.builder().sourceName(name).symbol("005930")
+                        .payload(Map.of("price", 100)).fetchedAt(Instant.now())
+                        .sessionDate(session).build());
+            }
+        };
+    }
+
+    @Test
+    void sessionDateReportedBySourceIsPropagated() {
+        java.time.LocalDate session = java.time.LocalDate.of(2026, 9, 8);
+        CollectorService service = new CollectorService(List.of(
+                sessionSource("krx-all", session),
+                new FakeSource("naver", true, false, false)));   // realtime, reports no session
+
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
+
+        assertThat(result.sessionDate()).isEqualTo(session);
+    }
+
+    @Test
+    void noSessionDateWhenNoSourceReportsOne() {
+        CollectorService service = new CollectorService(List.of(
+                new FakeSource("naver", true, false, false)));
+
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
+
+        assertThat(result.sessionDate()).isNull();
+    }
+
+    @Test
+    void conflictingSessionDatesAreNotPickedBetween() {
+        // Two sources disagreeing about the session means we do not know it — refuse to guess.
+        CollectorService service = new CollectorService(List.of(
+                sessionSource("krx-all", java.time.LocalDate.of(2026, 9, 8)),
+                sessionSource("other", java.time.LocalDate.of(2026, 9, 9))));
+
+        CollectionResult result = service.collectAll(java.time.LocalDate.of(2026, 9, 10));
+
+        assertThat(result.sessionDate()).isNull();
+    }
 }

@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Collector stage: runs every enabled {@link DataSource} and aggregates their raw items.
@@ -50,6 +53,21 @@ public class CollectorService {
         log.info("[collector] aggregated {} raw item(s) from {} source(s){}",
                 aggregated.size(), dataSources.size(),
                 failedRequired.isEmpty() ? "" : " — DEGRADED, failed required: " + failedRequired);
-        return new CollectionResult(aggregated, failedRequired);
+        return new CollectionResult(aggregated, failedRequired, sessionDateOf(aggregated));
+    }
+
+    /**
+     * The one session the sources reported, or null. Two different sessions in one run means we
+     * do not know which close the prices are — say so instead of picking one.
+     */
+    private LocalDate sessionDateOf(List<RawData> items) {
+        Set<LocalDate> sessions = new TreeSet<>();
+        items.stream().map(RawData::getSessionDate).filter(Objects::nonNull).forEach(sessions::add);
+        if (sessions.size() > 1) {
+            log.warn("[collector] sources reported different sessions {} — session date left unknown",
+                    sessions);
+            return null;
+        }
+        return sessions.isEmpty() ? null : sessions.iterator().next();
     }
 }
