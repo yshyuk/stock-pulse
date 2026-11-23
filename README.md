@@ -171,7 +171,8 @@ curl localhost:8080/api/reports/latest
 
 ### 8.1 self-hosted runner 등록
 GitHub 저장소 → **Settings → Actions → Runners → New self-hosted runner** → macOS 안내대로 설치/실행.
-러너는 Mac Mini에서 상시 동작하며, `main` 푸시 시 `.github/workflows/deploy.yml`을 실행합니다.
+러너는 Mac Mini에서 상시 동작하며, `release` 푸시(또는 수동 실행) 시 `.github/workflows/deploy.yml`을 실행합니다.
+(`main` 은 폐지되었습니다. `release` 가 프로덕션 트렁크이자 기본 브랜치입니다.)
 
 ```bash
 # (예) 러너를 로그인 시 자동 시작되는 서비스로 설치
@@ -223,11 +224,10 @@ pmset -g sched            # 예약 확인
 > 권장 조합: `pmset repeat`로 정시 전에 **깨우고**, 실행은 짧으니 그대로 끝나면 다시 잠듭니다.
 
 ### 8.5 배포 (자동)
-`main`에 푸시하면 self-hosted runner에서:
-1. checkout
-2. `./gradlew clean build` (테스트 포함)
-3. `build/libs/stock-pulse.jar` → `~/apps/stock-pulse/stock-pulse.jar` 교체
-4. plist 템플릿 변경 여부 점검(시크릿이 든 설치본은 자동 덮어쓰지 않고 경고만)
+`release`에 푸시하면(또는 Actions 에서 수동 실행) self-hosted runner에서:
+1. checkout, JDK 21 준비
+2. `./deploy/install.sh` — `./gradlew clean build`(테스트 포함) 후 jar·`analyze-report.sh`·`analysis-prompt.md` 셋을 `~/apps/stock-pulse/` 로 복사하고 레포와 일치하는지 확인
+3. 설치된 plist 에 템플릿의 키가 빠졌는지 점검(시크릿이 든 설치본은 덮어쓰지 않고 경고만, 배포는 실패시키지 않음)
 
 배치형이라 **데몬 재시작이 필요 없습니다** — 다음 새벽 실행 때 새 jar가 자동으로 쓰입니다.
 
@@ -235,7 +235,7 @@ pmset -g sched            # 예약 확인
 self-hosted 러너가 없거나 즉시 반영해야 할 때 씁니다.
 
 ```bash
-cd ~/Documents/Repository/stock-pulse
+cd ~/Repository/stock-pulse
 git checkout release && git pull origin release
 ./deploy/install.sh              # 빌드 + jar·스크립트·프롬프트를 ~/apps 로
 ./deploy/install.sh --no-build   # 이미 빌드했다면 배포만
